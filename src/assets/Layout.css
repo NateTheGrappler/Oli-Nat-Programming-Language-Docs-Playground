@@ -1,0 +1,12 @@
+/*the outer div holding navbar and central content div*/
+.outerShellDiv {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+
+/*the div that actually holds the different page content information and md file*/
+.contentDiv {
+    display: flex;
+    flex: 1;
+}

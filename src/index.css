@@ -1,0 +1,6 @@
+/*get rid of that ugly ass scroll bar*/
+* {
+  box-sizing: border-box;
+  scrollbar-width: none;
+  margin: 0;
+}
