@@ -32,12 +32,15 @@ function Layout() {
     return (
         <div className="outerShellDiv">
             {/*This is the app shell div and it basically holds the nav bar and encompassing side by side elements*/}
-            <NavBar 
-                sections={sections}
-                activeId={activeSection?.id}
-                showToggle={isSmallScreen}
-                toggleSidebar={() => setSideBarOpen(o=>!o)}
-            />
+
+            <div className = "navbarDiv">
+                <NavBar 
+                    sections={sections}
+                    activeId={activeSection?.id}
+                    showToggle={isSmallScreen}
+                    toggleSidebar={() => setSideBarOpen(o=>!o)}
+                />
+            </div>
             
             {/*Content div that would hold both the different clickable sections as well as main md display component */}
             <div className="contentDiv">

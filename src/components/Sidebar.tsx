@@ -14,7 +14,6 @@ function Sidebar({pages, isSmallScreen, isOpen}: {pages: Page[], isSmallScreen: 
 
     return (
         <div className = {mode}>
-            <h1>This is the SideBar</h1>
         </div>
     );
 }

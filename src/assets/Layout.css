@@ -3,6 +3,7 @@
     display: flex;
     flex-direction: column;
     min-height: 100vh;
+    background-color: #181F2B;
 }
 
 /*the div that actually holds the different page content information and md file*/
@@ -10,3 +11,4 @@
     display: flex;
     flex: 1;
 }
+

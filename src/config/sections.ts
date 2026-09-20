@@ -31,6 +31,20 @@ export const sections: Section[] = [
     nextRoute: '/docs/guides'
  },
 
+
+ {
+    id: 'contributing',
+    label: 'Contributing',
+    route: '/docs/contributing',
+    pages: [
+        { slug: 'getting-started', title: 'Local setup' },
+        { slug: 'project-structure', title: 'Project structure' },
+        { slug: 'testing', title: 'Running tests' },
+        { slug: 'how-to-help', title: 'Ways to contribute' },
+    ],
+    nextRoute: '/docs',
+},
+
 //this is the simple portion of the docs that explain basically how to use the language
  {  
     id: 'guides',

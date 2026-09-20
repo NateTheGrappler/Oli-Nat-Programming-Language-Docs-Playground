@@ -1,3 +1,111 @@
 .navBarMainDiv {
-    background-color: aqua;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background-color: #191A1C;
+    border-bottom: 0.5px solid #2A2E38;
+    height: 64px;
+    padding: 0 1.5rem;
+    box-sizing: border-box;
+}
+
+.navbarLeft {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.navbarLogo {
+    height: 70px;
+    width: auto;
+}
+
+.navbar-name {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 24px;
+    font-weight: 800;
+    color: #E8E6E1;
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    transition: color 0.3s ease;
+    padding-right: 12px;
+
+}
+
+.navbar-name:hover {
+    color: #D4A94E;
+}
+
+.navbar-breadcrumb {
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    letter-spacing: 0.02em;
+    color: #8B93A7;
+    background-color: #393C5A;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 3px;
+    border-radius: 8px;
+}
+
+.navBarRight {
+    display: flex;
+    align-items: center;
+    gap: 20px;
+}
+
+.navbar-link {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 18px;
+    color: #E8E6E1;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+.navbar-link:hover {
+    color: #D4A94E;
+}
+
+
+
+.navbar-link.active {
+    color: #D4A94E;
+}
+
+.navbar-github-icon {
+    height: 24px;
+    width: 24px;
+}
+
+.PlayGroundspan {
+    align-items: center;
+    border-radius: 8px;
+    padding: 3px;
+}
+
+.playground-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 10px;
+    border-radius: 8px;
+    color: #D4A94E;
+    background-color: #232332;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-weight: 500;
+    font-size: 18px;
+    text-decoration: none;
+    transition: background-color 0.2s ease;
+}
+
+.playground-link:hover {
+    color: #a5300d;
+    background-color: #D4A94E;
+    font-weight: 600;
+}
+
+.playground-icon {
+    height: 30px;
+    width: 30px;
 }
