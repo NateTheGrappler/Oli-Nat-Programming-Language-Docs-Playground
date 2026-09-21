@@ -1,7 +1,19 @@
 import type { Page } from '../config/sections';
+import {NavLink} from 'react-router-dom'
+import SidebarItem from './SidebarItem';
 import '../assets/Sidebar.css'
 
-function Sidebar({pages, isSmallScreen, isOpen}: {pages: Page[], isSmallScreen: boolean, isOpen: boolean})
+interface SidebarProps {
+    pages: Page[];
+    nextRouteLabel?: string;
+    nextRoute?: string;
+    sectionLabel?: string; 
+    basePath: string; 
+    isSmallScreen: boolean, 
+    isOpen: boolean
+}
+
+function Sidebar({pages, nextRouteLabel, nextRoute, sectionLabel, basePath, isSmallScreen, isOpen}: SidebarProps)
 {
 
     //deciede if the sidebar should render based on if there is enough space for it to,
@@ -13,8 +25,30 @@ function Sidebar({pages, isSmallScreen, isOpen}: {pages: Page[], isSmallScreen: 
     const mode = isSmallScreen ? 'sideBar-floating' : 'sideBar-embedded'
 
     return (
-        <div className = {mode}>
+        <div className={`sidebar ${mode}`}>
+            <span className="sidebar-title">{sectionLabel ? `${sectionLabel} :>` : ''}</span>
+            <hr className="sidebar-divider" />
+
+            <div className="sidebar-links">
+                {pages.map(page => (
+                    <SidebarItem key={page.slug} page={page} basePath={basePath} />
+                ))}
+            </div>
+
+
+            {nextRoute && (
+                <>
+                    <span className="sidebar-nextRead">Suggested Next Read:</span>
+                    <hr className="sidebar-divider-bottom" />
+                    <NavLink to={nextRoute} className="sidebar-next-button">
+                        {nextRouteLabel}  ➜
+                    </NavLink>
+                </>
+            )}
+
         </div>
+
+        
     );
 }
 

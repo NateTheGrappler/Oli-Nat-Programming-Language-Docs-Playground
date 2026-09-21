@@ -1,4 +1,8 @@
 .outerMainContentDiv {
-    background-color: #0C1021;
+    background-color: #14161A;
+    color: #E8E6E1;
     flex: 1;
+    padding: 2rem;
+    box-sizing: border-box;
+    overflow-y: auto;
 }

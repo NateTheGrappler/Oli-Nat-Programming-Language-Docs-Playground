@@ -44,7 +44,7 @@ function Layout() {
             
             {/*Content div that would hold both the different clickable sections as well as main md display component */}
             <div className="contentDiv">
-                <Sidebar pages = {activeSection?.pages?? []} isSmallScreen={isSmallScreen} isOpen={sideBarOpen}/>
+                <Sidebar pages = {activeSection?.pages?? []} nextRouteLabel={activeSection?.nextRouteLabel} nextRoute={activeSection?.nextRoute} sectionLabel={activeSection?.label} basePath={activeSection?.route ?? ''} isSmallScreen={isSmallScreen} isOpen={sideBarOpen}/>
                 <MainContent activeSection={activeSection} documentationFilePath={location.pathname}/>
             </div>
 
