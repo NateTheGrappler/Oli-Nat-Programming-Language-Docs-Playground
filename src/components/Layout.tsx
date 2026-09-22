@@ -12,8 +12,11 @@ function Layout() {
 
     //get the location URL and screensize check
     const location = useLocation();
-    const isSmallScreen = useMediaQuery('(max-width: 768px)')
+    const isSmallScreen = useMediaQuery('(max-width: 1080px)')
     const [sideBarOpen, setSideBarOpen] = useState(false);
+    const [hideSidebar, setHideSidebar] = useState(false); //feels a little silly to have this but it is used to differentiate between the screen closing due to user input or because of a small screen
+
+
 
     //reset the open variable that the button changes whenever the screen size changes from either big or small
     //this is so the user does not have the sidebar interface kept open whenever the page is resized
@@ -37,6 +40,7 @@ function Layout() {
                 <NavBar 
                     sections={sections}
                     activeId={activeSection?.id}
+                    isSmallScreen={isSmallScreen}
                     showToggle={isSmallScreen}
                     toggleSidebar={() => setSideBarOpen(o=>!o)}
                 />
@@ -44,7 +48,16 @@ function Layout() {
             
             {/*Content div that would hold both the different clickable sections as well as main md display component */}
             <div className="contentDiv">
-                <Sidebar pages = {activeSection?.pages?? []} nextRouteLabel={activeSection?.nextRouteLabel} nextRoute={activeSection?.nextRoute} sectionLabel={activeSection?.label} basePath={activeSection?.route ?? ''} isSmallScreen={isSmallScreen} isOpen={sideBarOpen}/>
+                <Sidebar pages = {activeSection?.pages?? []} 
+                                nextRouteLabel={activeSection?.nextRouteLabel} 
+                                nextRoute={activeSection?.nextRoute} 
+                                sectionLabel={activeSection?.label} 
+                                basePath={activeSection?.route ?? ''} 
+                                isSmallScreen={isSmallScreen}
+                                hideSidebar={hideSidebar}
+                                isOpen={sideBarOpen}
+                                onClose = {() => {setSideBarOpen(false); setHideSidebar(true)}}
+                                onOpen = {() => {setHideSidebar(false)}}/>
                 <MainContent activeSection={activeSection} documentationFilePath={location.pathname}/>
             </div>
 

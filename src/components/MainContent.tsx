@@ -4,7 +4,6 @@ import '../assets/MainContent.css'
 function MainContent({activeSection, documentationFilePath}: {activeSection?: Section, documentationFilePath: string})
 {
 
-    console.log(documentationFilePath)
     return (
         <div className="outerMainContentDiv">
             <h1>{activeSection?.label}</h1>

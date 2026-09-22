@@ -62,17 +62,59 @@
     transition: color 0.2s ease;
 }
 
+.navbar-link-small {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 14px;
+    color: #E8E6E1;
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
 .navbar-link:hover {
     color: #EF8D38;
 }
 
-.navbar-link.active {
-    color: #EF8D38;
-}
 
 .navbar-github-icon {
     height: 24px;
     width: 24px;
+    color: #E8E6E1;
+    transition: color 0.2s ease;
+
+}
+
+.navbar-github-icon:hover {
+    height: 26px;
+    width: 26px;
+    color: #EF8D38;
+}
+
+.navbar-home-icon {
+    height: 26px;
+    width: 26px;
+    color: #E8E6E1;
+    transition: color 0.2s ease;
+
+}
+
+.navbar-home-icon-small {
+    height: 22x;
+    width: 22px;
+    color: #E8E6E1;
+    transition: color 0.2s ease;
+
+}
+
+.navbar-home-icon:hover {
+    height: 24px;
+    width: 24px;
+    color: #EF8D38;
+}
+
+.navbar-home-icon:hover {
+    height: 28px;
+    width: 28px;
+    color: #EF8D38;
 }
 
 .playground-link {
@@ -90,13 +132,35 @@
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+.playground-link-small {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 10px;
+    border-radius: 8px;
+    color: #EF8D38;
+    background-color: #29134e;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-weight: 500;
+    font-size: 16px;
+    text-decoration: none;
+    transition: background-color 0.3s ease, color 0.3s ease;
+}
+
 .playground-link:hover {
     color: #14161A;
-    background-color: #F9CB22;
+    background-color: #EF8D38;
     font-weight: 600;
 }
 
-.playground-icon {
-    height: 18px;
-    width: 18px;
+.playground-link-small:hover {
+    color: #14161A;
+    background-color: #EF8D38;
+    font-weight: 600;
+}
+
+
+.navbar-openSidebar {
+    background: none;
+    border: 0;
 }

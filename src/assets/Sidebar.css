@@ -9,7 +9,8 @@
     flex: 0 0 280px;
     position: relative;
     background-color: #1D1F23;
-    border-right: 0.5px solid #2E2A26;
+    border-right: 1px solid #5d5c5f;
+    transition: flex 0.1s ease
 }
 
 .sideBar-floating {
@@ -20,6 +21,7 @@
     width: 70%;
     z-index: 10;
     background-color: #1D1F23;
+
 }
 
 .sidebar-title {
@@ -157,4 +159,98 @@
 .sidebar-item-nested.sidebar-link-active {
     color: #F9CB22;
     font-style: normal;
+}
+
+.sidebar-closeButton {
+    display: flex;
+    justify-items: center;
+    align-items: center;
+    background: none;
+    border: 0;
+}
+
+.sidebar-closeButton:hover {
+
+    cursor: pointer;
+    .sidebar-closeSvg {
+    color: #EF8D38;
+}
+}
+
+.sidebar-header {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+}
+
+.sidebar-closeSvg {
+    background-color: none;
+    color: #8B93A7;
+    padding: 4px;
+}
+
+
+
+.sidebar-collapsed {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 48px;
+    background-color: #1D1F23;
+    border-right: 2px solid #5d5c5f;
+    border-left: none;
+    transition: flex 0.1s ease
+}
+
+.sidebar-content {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    opacity: 1;
+}
+
+.sidebar-collapsed .sidebar-content {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.sidebar-openAgain {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    background: none;
+    border: 0;
+    color: #8B93A7;
+    cursor: pointer;
+}
+
+.sidebar-collapsed .sidebar-openAgain {
+    opacity: 1;
+    pointer-events: auto;
+    height: 100vh;
+    width: 100vw;
+    transition: background-color 0.3s ease;
+}
+
+.sidebar-collapsed .sidebar-openAgain:hover {
+    opacity: 1;
+    pointer-events: auto;
+    height: 100vh;
+    width: 100vw;
+    background-color: #29134e;
+
+    .sidebar-openArrowSvg {
+        height: 36px;
+        width: 36px;
+        color:#EF8D38;
+    }
+}
+
+
+.sidebar-openArrowSvg {
+    height: 36px;
+    width: 36px;
+    color:#8B93A7;
+    transition: color 0.3s ease;
+
 }
