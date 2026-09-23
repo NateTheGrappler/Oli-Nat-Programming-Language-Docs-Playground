@@ -48,6 +48,11 @@ function Layout() {
             
             {/*Content div that would hold both the different clickable sections as well as main md display component */}
             <div className="contentDiv">
+
+                {isSmallScreen && sideBarOpen && (
+                <div className="sidebar-backdrop" onClick={() => setSideBarOpen(false)} />
+                )}
+
                 <Sidebar pages = {activeSection?.pages?? []} 
                                 nextRouteLabel={activeSection?.nextRouteLabel} 
                                 nextRoute={activeSection?.nextRoute} 

@@ -2,6 +2,7 @@ import type { Section } from '../config/sections';
 import {useLocation, NavLink} from 'react-router-dom'
 import logo from '../assets/Images/Oli-Nat-Logo-NoDragon.png';
 import '../assets/Navbar.css'
+import DocsDropdown from "./DocsDropdown"
 
 interface NavBarProps {
     sections: Section[];
@@ -44,7 +45,7 @@ function NavBar({sections, activeId, isSmallScreen, showToggle, toggleSidebar }:
             <div className="navBarRight">
                 
                 {/*Eventually these will become clickable redirects, the docs might be different because I want it to be a dropdown */}
-                <span className="navbar-link">{!isSmallScreen ? "Docs ▼" : "Docs"}</span>
+                <DocsDropdown sections={sections}/>
                
                 {!isSmallScreen &&
                     <NavLink to="/docs/contributing" className="navbar-link">

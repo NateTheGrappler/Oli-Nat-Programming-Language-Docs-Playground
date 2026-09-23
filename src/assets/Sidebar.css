@@ -21,7 +21,12 @@
     width: 70%;
     z-index: 10;
     background-color: #1D1F23;
+    animation: slideout 0.2s ease;
+}
 
+@keyframes slideout {
+    from {transform: translateX(-100%);}
+    to {transform: translateX(0%);}
 }
 
 .sidebar-title {

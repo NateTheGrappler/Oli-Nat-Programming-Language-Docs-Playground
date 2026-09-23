@@ -27,7 +27,6 @@ function Sidebar({pages, nextRouteLabel, nextRoute, sectionLabel, basePath, isSm
     console.log("IsSmallScreen: " + isSmallScreen);
     console.log("hideSideBar: " + hideSidebar);
     if(!shouldRender) return null;
-    const mode = isSmallScreen ? 'sideBar-floating' : 'sideBar-embedded'
 
 
     if(isSmallScreen)
