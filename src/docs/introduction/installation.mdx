@@ -1,0 +1,51 @@
+## Building From Source:
+
+### Linux / MacOS
+
+```bash
+git clone https://github.com/NateTheGrappler/OliNat-Programming-Language.git
+cd OliNat-Programming-Language
+mkdir cmake-build
+cd cmake-build
+cmake ..
+make
+./Oli_Nat </path/to/your/source.oli>
+```
+### Windows (MSYS2 / MinGW-w64)
+
+1. Install [MSYS2](https://msys2.org) && install repository
+```bash
+git clone https://github.com/NateTheGrappler/OliNat-Programming-Language.git
+```
+2. Open the **UCRT64** shell and install the toolchain:
+```bash
+pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-cmake mingw-w64-ucrt-x86_64-make
+```
+3. Build inside said shell
+
+```bash
+cd /c/your/path/to/OliNat-Programming-Language
+mkdir cmake-build
+cd cmake-build
+cmake .. -G "MinGW Makefiles"
+mingw32-make
+```
+4. Inside of the cmake-build directory, find the executable file & run program in any terminal
+```PowerShell
+./Oli_Nat.exe </path/to/your/source.oli>
+```
+
+## Example Programs
+
+The [`testCases/`](testCases) folder has runnable `.oli/.txt` example programs covering classes, control flow, and the standard library. Once built, try one out:
+
+Run inside of cmake-build directory containing `Oli_Nat` executable
+```bash
+./Oli_Nat ../testCases/Classes/InheritanceTestBaby.oli
+```
+
+### Developer Tips:
+Enable debug tracing by defining `DEBUG_TRACE_EXECUTION` to print the stack state and disassembled instruction before each opcode. Define `DEBUG_LOG_GC` to trace garbage collection events.
+You can also uncomment the santitization libraries in the `cmake.txt` file in order to utilize that library if you have it
+installed
+Feel free to look through the code's guts and have fun with it as I did!

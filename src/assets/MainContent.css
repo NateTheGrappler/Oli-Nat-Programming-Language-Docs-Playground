@@ -6,3 +6,141 @@
     box-sizing: border-box;
     overflow-y: auto;
 }
+
+.doc-content {
+    max-width: 1080px;
+    margin: 0 auto;
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+}
+
+.doc-content h1 {
+    font-family: 'Oswald', sans-serif;
+    font-size: 2em;
+    font-weight: 600;
+    color: #E8E6E1;
+    margin: 0 0 16px;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid #2E2A26;
+}
+
+.doc-content h2 {
+    font-family: 'Oswald', sans-serif;
+    font-size: 1.5em;
+    font-weight: 600;
+    color: #E8E6E1;
+    margin: 40px 0 16px;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid #2E2A26;
+}
+
+.doc-content h3 {
+    font-size: 1.25em;
+    font-weight: 600;
+    color: #E8E6E1;
+    margin: 28px 0 12px;
+}
+
+.doc-content h4 {
+    font-size: 1em;
+    font-weight: 600;
+    color: #E8E6E1;
+    margin: 24px 0 12px;
+}
+
+.doc-content p {
+    color: #C8C6C1;
+    margin: 0 0 16px;
+}
+
+.doc-content a {
+    color: #EF8D38;
+    text-decoration: underline;
+    text-decoration-color: #2E2A26;
+    transition: text-decoration-color 0.15s ease;
+}
+
+.doc-content a:hover {
+    text-decoration-color: #EF8D38;
+}
+
+.doc-content ul,
+.doc-content ol {
+    margin: 0 0 16px;
+    padding-left: 2em;
+    color: #C8C6C1;
+}
+
+.doc-content li + li {
+    margin-top: 4px;
+}
+
+.doc-content li > ul,
+.doc-content li > ol {
+    margin: 4px 0 0;
+}
+
+.doc-content table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 20px;
+    font-size: 14px;
+}
+
+.doc-content th,
+.doc-content td {
+    border: 1px solid #2E2A26;
+    padding: 8px 12px;
+    text-align: left;
+}
+
+.doc-content th {
+    background-color: #1D1F23;
+    color: #E8E6E1;
+    font-weight: 600;
+}
+
+.doc-content tr:nth-child(even) td {
+    background-color: #1A1C20;
+}
+
+.doc-content code:not(pre code) {
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+    font-size: 0.85em;
+    background-color: #29134e;
+    color: #E8E6E1;
+    padding: 0.2em 0.4em;
+    border-radius: 6px;
+}
+
+.doc-content pre {
+    background-color: #1D1F23;
+    border: 0.5px solid #2E2A26;
+    border-radius: 6px;
+    padding: 16px;
+    overflow-x: auto;
+    margin: 0 0 20px;
+    font-size: 0.85em;
+    line-height: 1.45;
+}
+
+.doc-content pre code {
+    font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
+    background: none;
+    padding: 0;
+    color: #E8E6E1;
+}
+
+.doc-content blockquote {
+    border-left: 0.25em solid #EF8D38;
+    margin: 0 0 16px;
+    padding: 0 1em;
+    color: #8B93A7;
+}
+
+.doc-content hr {
+    border: none;
+    border-top: 0.5px solid #2E2A26;
+    margin: 32px 0;
+}

@@ -24,8 +24,8 @@ function Sidebar({pages, nextRouteLabel, nextRoute, sectionLabel, basePath, isSm
     //then you do not render it, otherwise, if they have, you see if it gets rendered in the floating
     //style, or just the regular embedded way
     const shouldRender = !isSmallScreen || isOpen;
-    console.log("IsSmallScreen: " + isSmallScreen);
-    console.log("hideSideBar: " + hideSidebar);
+    // console.log("IsSmallScreen: " + isSmallScreen);
+    // console.log("hideSideBar: " + hideSidebar);
     if(!shouldRender) return null;
 
 
