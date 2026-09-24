@@ -3,6 +3,7 @@ import {sections} from '../config/sections'
 import Sidebar from './Sidebar';
 import MainContent from './MainContent';
 import NavBar from './Navbar';
+import Playground from './Playground/Playground';
 import useMediaQuery from '../hooks/useMediaQuery';
 import {useState, useEffect} from 'react'
 import '../assets/Layout.css'
@@ -16,7 +17,7 @@ function Layout() {
     const [sideBarOpen, setSideBarOpen] = useState(false);
     const [hideSidebar, setHideSidebar] = useState(false); //feels a little silly to have this but it is used to differentiate between the screen closing due to user input or because of a small screen
 
-
+    const isPlayground = location.pathname.startsWith('/playground')
 
     //reset the open variable that the button changes whenever the screen size changes from either big or small
     //this is so the user does not have the sidebar interface kept open whenever the page is resized
@@ -49,21 +50,32 @@ function Layout() {
             {/*Content div that would hold both the different clickable sections as well as main md display component */}
             <div className="contentDiv">
 
-                {isSmallScreen && sideBarOpen && (
-                <div className="sidebar-backdrop" onClick={() => setSideBarOpen(false)} />
+                {/*render the playground if the specific route for it is git, otherwise hit the regular docs displays */}
+                {isPlayground ? 
+                (
+                    <Playground/>
+                ) : 
+                (
+                    <> 
+                        {/*Standard, just render the options for the documentation portion of the site */}
+                        {isSmallScreen && sideBarOpen && (
+                        <div className="sidebar-backdrop" onClick={() => setSideBarOpen(false)} />
+                        )}
+
+                        <Sidebar pages = {activeSection?.pages?? []} 
+                                        nextRouteLabel={activeSection?.nextRouteLabel} 
+                                        nextRoute={activeSection?.nextRoute} 
+                                        sectionLabel={activeSection?.label} 
+                                        basePath={activeSection?.route ?? ''} 
+                                        isSmallScreen={isSmallScreen}
+                                        hideSidebar={hideSidebar}
+                                        isOpen={sideBarOpen}
+                                        onClose = {() => {setSideBarOpen(false); setHideSidebar(true)}}
+                                        onOpen = {() => {setHideSidebar(false)}}/>
+                        <MainContent activeSection={activeSection} documentationFilePath={location.pathname}/>
+                    </>
                 )}
 
-                <Sidebar pages = {activeSection?.pages?? []} 
-                                nextRouteLabel={activeSection?.nextRouteLabel} 
-                                nextRoute={activeSection?.nextRoute} 
-                                sectionLabel={activeSection?.label} 
-                                basePath={activeSection?.route ?? ''} 
-                                isSmallScreen={isSmallScreen}
-                                hideSidebar={hideSidebar}
-                                isOpen={sideBarOpen}
-                                onClose = {() => {setSideBarOpen(false); setHideSidebar(true)}}
-                                onOpen = {() => {setHideSidebar(false)}}/>
-                <MainContent activeSection={activeSection} documentationFilePath={location.pathname}/>
             </div>
 
         </div>
