@@ -1,10 +1,27 @@
 import "../../assets/testCases.css"
 
-function TestCases ()
-{
+interface TestCase {
+    name: string;
+    code: string;
+}
+
+const sampleTests: TestCase[] = [
+    { name: "Hello World", code: `println("Hello Dear User!");` },
+];
+
+function TestCases() {
     return (
-        <div className = "testCases">
-            This is the test cases div
+        <div className="testCases">
+            <div className="testCases-title">Sample Programs</div>
+            <div className="testCases-list">
+                {sampleTests.map((test) => (
+                    <button
+                        key={test.name}
+                        className="testCases-item">
+                        {test.name}
+                    </button>
+                ))}
+            </div>
         </div>
     );
 }

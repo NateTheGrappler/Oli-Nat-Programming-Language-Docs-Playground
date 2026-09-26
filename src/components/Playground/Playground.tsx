@@ -11,8 +11,8 @@ function Playground()
         <div className = "playground-mainContent">
             
             <div className = "playground-inputContent">
-                <CodeEditor />
                 <TestCases />
+                <CodeEditor />
             </div>
             
             <CodeTerminal />

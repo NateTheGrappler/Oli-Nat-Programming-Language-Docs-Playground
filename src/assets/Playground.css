@@ -3,14 +3,12 @@
     flex: 1;
     flex-direction: row;
     min-height: 0;
-    gap: 12px;
-    padding: 12px;
 }
 
 .playground-inputContent {
     display: flex;
-    flex-direction: column;
-    flex: 0 0 50%;
+    flex-direction: row;
+    flex: 1;
     min-height: 0;
     gap: 10px;
 }

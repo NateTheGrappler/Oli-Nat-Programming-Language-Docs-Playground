@@ -1,8 +1,10 @@
 .codeEditor {
     display: flex;
     flex-direction: column;
-    flex: 1;
+    flex: 0 0 75%;
     min-height: 0;
+    padding-top: 12px;
+    padding-bottom: 12px;
 }
 
 .codeEditorRoot {
@@ -28,30 +30,32 @@
 
 .codeEditorRoot .cm-scroller {
     font-family: 'JetBrains Mono', 'IBM Plex Mono', monospace;
-    font-size: 14px;
+    font-size: 16px;
     line-height: 1.6;
 }
 
 .codeEditorRoot .cm-gutters {
-    border-right: 0.5px solid #2E2A26;
+    border-right: 1x solid #2E2A26;
 }
-
 
 
 .codeEditor-Buttons {
     display: flex;
     flex-direction: row;
-    justify-content: right;
+    justify-content: center;
     flex-shrink: 0;
     gap: 10px;
     margin-top: 10px;
     margin-right: 8px;
+    padding: 3px ;
+
 }
 
 .codeEditor-Run {
     padding: 10px 24px;
     border-radius: 8px;
     background-color: #29134e;
+    flex: 0 0 50%;
     color: #EF8D38;
     border: 1px solid #8B93A7;
     font-family: 'Inter', system-ui, sans-serif;
@@ -59,6 +63,7 @@
     font-weight: 600;
     cursor: pointer;
     transition: background-color 0.2s ease, color 0.2s ease;
+    margin-right: 10px;
 }
 
 .codeEditor-Run:hover {
@@ -81,12 +86,14 @@
     padding: 10px 20px;
     border-radius: 8px;
     background: none;
+    flex: 0 0 50%;
     color: #8B93A7;
     border: 1px solid #8B93A7;
     font-family: 'Inter', system-ui, sans-serif;
     font-size: 16px;
     cursor: pointer;
     transition: color 0.2s ease, border-color 0.2s ease;
+    margin-left: 10px;
 }
 
 .codeEditor-Clear:hover {

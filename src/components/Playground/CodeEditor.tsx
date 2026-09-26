@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { nord } from '@uiw/codemirror-theme-nord';
 import { cpp } from '@codemirror/lang-cpp';
 import "../../assets/CodeEditor.css"
-import logo from '../../assets/Images/Oli-Nat-Logo-Banner.png';
 
 
 
@@ -34,8 +33,6 @@ function CodeEditor()
                 <button className="codeEditor-Clear">Clear</button>
                 <button className="codeEditor-Run">Run</button>
             </div>
-
-
             
         </div>
     );

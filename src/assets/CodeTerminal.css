@@ -1,4 +1,22 @@
 .codeTerminal {
-    background-color: azure;
-    width: 50vw;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex: 0 0 auto;
+    min-height: 0;
+    box-sizing: border-box;
+}
+
+.codeTerminal-monitor {
+    position: relative;
+    height: 100%;
+    width: auto;
+}
+
+.codeTerminal-Computer {
+    display: block;
+    height: 100%;
+    width: auto;
+    object-fit: contain;
+    image-rendering: pixelated;
 }
