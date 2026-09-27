@@ -1,15 +1,21 @@
 import CodeMirror from '@uiw/react-codemirror';
-import { useState } from 'react';
 import { nord } from '@uiw/codemirror-theme-nord';
 import { cpp } from '@codemirror/lang-cpp';
 import "../../assets/CodeEditor.css"
 
+interface codeEditorProps {
+    code: string;
+    changeCode: (code: string) => void;
+}
 
-
-function CodeEditor()
+function CodeEditor({code, changeCode}: codeEditorProps)
 {
 
-    const [code, setCode] = useState("make int x = 10;\nprintln(x);")
+    function handleClear() {
+        //a bunch of newline characters so it shows the numbers cuz it looks better
+        changeCode("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+    }
+
 
     return (
         <div className="codeEditor">
@@ -21,7 +27,7 @@ function CodeEditor()
                 height="100%"
                 theme ={nord}
                 extensions={[cpp()]}
-                onChange={(value) => setCode(value)}
+                onChange={(value) => changeCode(value)}
                 basicSetup={{
                     lineNumbers: true,
                     highlightActiveLine: true,
@@ -30,7 +36,7 @@ function CodeEditor()
             />
 
             <div className="codeEditor-Buttons">
-                <button className="codeEditor-Clear">Clear</button>
+                <button className="codeEditor-Clear" onClick={handleClear}>Clear</button>
                 <button className="codeEditor-Run">Run</button>
             </div>
             
