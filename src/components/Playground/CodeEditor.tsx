@@ -6,9 +6,10 @@ import "../../assets/CodeEditor.css"
 interface codeEditorProps {
     code: string;
     changeCode: (code: string) => void;
+    runCode: () => void;
 }
 
-function CodeEditor({code, changeCode}: codeEditorProps)
+function CodeEditor({code, changeCode, runCode}: codeEditorProps)
 {
 
     function handleClear() {
@@ -37,7 +38,7 @@ function CodeEditor({code, changeCode}: codeEditorProps)
 
             <div className="codeEditor-Buttons">
                 <button className="codeEditor-Clear" onClick={handleClear}>Clear</button>
-                <button className="codeEditor-Run">Run</button>
+                <button className="codeEditor-Run" onClick={runCode}>Run</button>
             </div>
             
         </div>
