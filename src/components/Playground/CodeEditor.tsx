@@ -1,4 +1,5 @@
 import CodeMirror from '@uiw/react-codemirror';
+import { EditorView } from '@codemirror/view';
 import { nord } from '@uiw/codemirror-theme-nord';
 import { cpp } from '@codemirror/lang-cpp';
 import "../../assets/CodeEditor.css"
@@ -14,7 +15,7 @@ function CodeEditor({code, changeCode, runCode}: codeEditorProps)
 
     function handleClear() {
         //a bunch of newline characters so it shows the numbers cuz it looks better
-        changeCode("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+        changeCode("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
     }
 
 
@@ -27,7 +28,7 @@ function CodeEditor({code, changeCode, runCode}: codeEditorProps)
                 value={code}
                 height="100%"
                 theme ={nord}
-                extensions={[cpp()]}
+                extensions={[cpp(), EditorView.lineWrapping]}
                 onChange={(value) => changeCode(value)}
                 basicSetup={{
                     lineNumbers: true,

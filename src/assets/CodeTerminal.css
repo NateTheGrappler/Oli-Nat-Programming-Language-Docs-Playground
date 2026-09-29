@@ -20,3 +20,25 @@
     object-fit: contain;
     image-rendering: pixelated;
 }
+
+
+.codeTerminal-screen {
+    background-color: black;
+    position: absolute;
+    top: 9%;
+    left: 20%;
+    width: 63%;
+    height: 65%;
+    overflow-y: auto;
+    padding: 0.5rem;
+    box-sizing: border-box;
+
+    font-family: "Courier New", monospace;
+    color: #20C20E;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.codeTerminal-error {
+    color: #ff5555;
+}

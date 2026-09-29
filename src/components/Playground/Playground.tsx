@@ -11,7 +11,7 @@ import createOliNat from '../../WASM/Oli_Nat.mjs'
 //main parent component that encompasses the content that gets seen by the /playground route
 function Playground()
 {
-    const [code, setCode] = useState("make int x = 10;\nprintln(x);")
+    const [code, setCode] = useState("")
     const [codeOutput, setCodeOutput] = useState<{text: string; error: boolean}[]>([]);
     const [ready, setReady] = useState(false);
 

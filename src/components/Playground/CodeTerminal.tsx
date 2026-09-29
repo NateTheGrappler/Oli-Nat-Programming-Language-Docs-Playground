@@ -35,14 +35,14 @@ function CodeTerminal({outPutArray, ready}: CodeTerminalProps)
                     {outPutArray.length === 0 ? (
 
                         <div className='codeTerminal-placeHolder'>
-                            {ready ? "> press run to execute your code!" : "> loading Oli-Nat Binaries..."}
+                            {ready ? ":> press run to execute your code!" : "> loading Oli-Nat Binaries..."}
                         </div>
 
                     ) : (
                         outPutArray.map((line, i) => (
-                            <div key={i} className={line.error ? "codeTerminal-line" : "codeTerminal-error"}>
+                            <div key={i} className={!line.error ? "codeTerminal-line" : "codeTerminal-error"}>
                                 {/*This iterates over all of the line objects stored inside of the output array and then renders them as their own div */}
-                                {line.text}
+                                {":> " + line.text}
                             </div>
                         ))
                     )}
