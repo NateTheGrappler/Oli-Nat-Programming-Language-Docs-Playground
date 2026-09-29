@@ -13,6 +13,8 @@ export interface OliNatModule {
 export interface OliNatOptions {
   print?: (line: string) => void;
   printErr?: (line: string) => void;
+  stdout?: (charCode: number) => void;
+  stderr?: (charCode: number) => void;
 }
 
 declare function createOliNat(options?: OliNatOptions): Promise<OliNatModule>;
