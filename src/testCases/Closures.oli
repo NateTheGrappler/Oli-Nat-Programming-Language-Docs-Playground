@@ -1,0 +1,19 @@
+#pullf io
+
+make empty counterDemo()
+{
+    make int count = 0;
+
+    make empty increment()
+    {
+        count++;
+    }
+
+    increment();
+    increment();
+    increment();
+    println(count);
+}
+
+counterDemo();
+//expected output: 3

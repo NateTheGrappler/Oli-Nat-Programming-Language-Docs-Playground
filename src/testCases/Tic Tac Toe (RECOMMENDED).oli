@@ -1,0 +1,230 @@
+//tic tac toe was the first python program I ever wrote at the age of 16 in my 11th year of school. I was brand new to programming, and it was how I learnt python and what programming was. Since then, I have had a personal tradition of writting tic tac toe in every single language I learn as the first program. I thought it only fitting to do so for my very own programming language as well. I hope you enjoy.
+
+
+//built in functions in language's standard library
+#pullf io
+#pullf types
+#pullf math
+
+//arrays are fully supported by the language
+make string[] board = [" ", " ", " ", " ", " ", " ", " ", " ", " "];
+
+make int turnCount = 0;
+make bool gameRunning = true;
+
+
+//functions with return types, null types, as well as for loops with different iterators and different scope variables supported by language
+make empty printBoard()
+{
+  for(make int i = 0; i <= 8; i++)
+    {
+      print(board[i]);
+      print(" | ");
+
+      //conditonals and control flow exist in the language, with different conditionals
+      if((i == 2) || (i == 5) || (i == 8))
+      {
+        println("");
+        print("-----------");
+        println("");
+      }
+    }
+    print("<==============================================================>");
+}
+
+make bool updateBoard(int Index, string Character, string[] checkBoard, bool isAI)
+{
+  if(checkBoard[Index] == " ")
+  {
+    checkBoard[Index] = Character;
+    return true;
+  }
+  else
+  {
+    if(!isAI)
+    {
+      print("Spot: " + intToStr(Index + 1) + " is Taken, please pick again");
+      println(" ");
+    }
+    return false;
+    
+  }
+}
+//check win function
+make bool lineWins(int a, int b, int c, string[] checkBoard)
+{
+  if(checkBoard[a] != " ")
+  {
+    if(checkBoard[a] == checkBoard[b] && checkBoard[b] == checkBoard[c])
+    {
+      return true;
+    }
+  }
+  return false;
+}
+make bool checkWin(string[] checkBoard)
+{
+  if(lineWins(0, 1, 2, checkBoard)) { return true; }
+  if(lineWins(3, 4, 5, checkBoard)) { return true; }
+  if(lineWins(6, 7, 8, checkBoard)) { return true; }
+  if(lineWins(0, 3, 6, checkBoard)) { return true; }
+  if(lineWins(1, 4, 7, checkBoard)) { return true; }
+  if(lineWins(2, 5, 8, checkBoard)) { return true; }
+  if(lineWins(0, 4, 8, checkBoard)) { return true; }
+  if(lineWins(2, 4, 6, checkBoard)) { return true; }
+  return false;
+}
+
+//bot functions for picking the best option
+make int findWin()
+{
+  for(make int i = 0; i < 9; i++)
+  {
+    if(updateBoard(i, "O", board, true))
+    {
+      make bool winFound = checkWin(board);
+      board[i] = " ";
+      if(winFound) 
+      { 
+        return i; 
+      }
+    }
+  }
+  return 10;
+}
+make int findLoss()
+{
+    for(make int i = 0; i < 9; i++)
+  {
+    if(updateBoard(i, "X", board, true))
+    {
+      make bool winFound = checkWin(board);
+      board[i] = " ";
+      if(winFound) 
+      { 
+        return i; 
+      }
+    }
+  }
+  return 10;
+}
+make bool laneOpen(int a, int b, int c, string[] checkBoard)
+{
+  if(checkBoard[a] == " " && checkBoard[b] == " " && checkBoard[c] == " ")
+  {
+    return true;
+  }
+  return false;
+}
+make int findOpenLane(string[] checkBoard)
+{
+  //rows
+  if(laneOpen(0, 1, 2, checkBoard)) { return 1; }
+  if(laneOpen(3, 4, 5, checkBoard)) { return 4; }
+  if(laneOpen(6, 7, 8, checkBoard)) { return 7; }
+
+  //columns
+  if(laneOpen(0, 3, 6, checkBoard)) { return 3; }
+  if(laneOpen(1, 4, 7, checkBoard)) { return 4; }
+  if(laneOpen(2, 5, 8, checkBoard)) { return 5; }
+
+  //diagonals
+  if(laneOpen(0, 4, 8, checkBoard)) { return 4; }
+  if(laneOpen(2, 4, 6, checkBoard)) { return 4; }
+
+  return 10;
+}
+make int botDecision()
+{
+  //check if there is a win condition
+  make int winIndex = findWin();
+  if(winIndex != 10)
+  {
+    //make the winning move
+    updateBoard(winIndex, "O", board, true);
+    return winIndex;
+  }
+  make int lossIndex = findLoss();
+  if(lossIndex != 10) 
+  {
+    //make move to prevent loss
+    updateBoard(lossIndex, "O", board, true);
+    return lossIndex;
+  }
+  make int openLaneIndex = findOpenLane(board);
+  if(openLaneIndex != 10)
+  {
+    updateBoard(openLaneIndex, "O", board, true);
+    return openLaneIndex;
+  }
+
+  //fallback: first empty square
+  for(make int i = 0; i < 9; i++)
+  {
+    if(board[i] == " ")
+    {
+      updateBoard(i, "O", board, true);
+      return i;
+    }
+  }
+
+  return 10;
+}
+
+while(gameRunning)
+{
+  //print board out into terminal on the righthand
+  printBoard();
+
+  //expressions are fully supported with proper PEMDAS as well as function calls resolved in expressions
+  make int modTurnCount = turnCount - 2 * (turnCount / 2);
+  
+  if(modTurnCount == 0)
+  {
+    make int answer = strToInt(intake("Turn " + intToStr(turnCount+1) + " (X) Pick board location (1-9): "));
+    println(" ");
+
+  make bool goodPick = false;
+  if(answer >= 1 && answer <= 9)
+  {
+    goodPick = updateBoard(answer - 1, "X", board, false);
+  }
+  else
+  {
+    println("Pick a number from 1 to 9.");
+  }
+    if(goodPick) { turnCount++;}
+    if(checkWin(board)) 
+    {
+      gameRunning = false;
+      printBoard();
+      println("CONGRATULTAIONS, PLAYER X WINS, ONE MORE FOR HUMANITY!!");
+    }
+    if(gameRunning && turnCount == 9)
+    {
+      gameRunning = false;
+      printBoard();
+      println("It's a draw, I'd call it a win for you!");    }
+  }
+  else
+  {
+    make int botIndex = botDecision();
+    println("Turn " + intToStr(turnCount+1) + " (O) Oli-BOT is decieding location: " + intToStr(botIndex+1));
+    if(checkWin(board)) 
+    {
+      gameRunning = false;
+      printBoard();
+      println("AHH MAN, PLAYER O WINS, BEATEN BY A BOT!!");
+    }
+    if(gameRunning && turnCount == 9)
+    {
+      gameRunning = false;
+      printBoard();
+      println("It's a draw, I'd call it a win for you!");
+    }
+    turnCount++;
+  }
+  //gameRunning = false;
+
+}
+

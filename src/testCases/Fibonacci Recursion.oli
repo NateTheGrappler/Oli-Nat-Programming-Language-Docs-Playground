@@ -1,0 +1,13 @@
+#pullf io
+#pullf types
+
+make int fib(int n)
+{
+  if(n < 2) { return n; }
+  return fib(n - 1) + fib(n - 2);
+}
+
+for(make int i = 0; i <= 15; i++)
+{
+  println("fib(" + intToStr(i) + ") = " + intToStr(fib(i)));
+}

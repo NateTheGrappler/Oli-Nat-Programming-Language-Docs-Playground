@@ -1,0 +1,25 @@
+#pullf stdlib
+
+class Player
+{
+    make int health = 100;
+    make string name = "hero";
+
+    make empty takeDamage(int amount)
+    {
+        this.health -= amount;
+    }
+}
+
+make Player p = Player();
+println(p.name + " starts with " + intToStr(p.health) + " HP");
+
+p.takeDamage(25);
+p.takeDamage(10);
+println(p.name + " now has " + intToStr(p.health) + " HP");
+
+p.name = "Oli";
+println("Renamed to " + p.name);
+//expected: :> hero starts with 100 HP
+//expected: :> hero now has 65 HP
+//expected: :> Renamed to Oli

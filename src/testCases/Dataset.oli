@@ -1,0 +1,28 @@
+#pullf io
+#pullf types
+
+make int[] scores = [88, 92, 75, 64, 99, 81, 70];
+
+make int sum(int[] arr, int len)
+{
+  make int total = 0;
+  for(make int i = 0; i < len; i++) { total = total + arr[i]; }
+  return total;
+}
+
+make int maxOf(int[] arr, int len)
+{
+  make int best = arr[0];
+  for(make int i = 1; i < len; i++)
+  {
+    if(arr[i] > best) { best = arr[i]; }
+  }
+  return best;
+}
+
+make int total = sum(scores, 7);
+make double avg = intToDouble(total) / 7.0;
+
+println("Total:   " + intToStr(total));
+println("Highest: " + intToStr(maxOf(scores, 7)));
+println("Average: " + doubleToStr(avg));
