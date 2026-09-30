@@ -42,3 +42,21 @@
 .codeTerminal-error {
     color: #ff5555;
 }
+
+
+.codeTerminal-inputLine {
+    display: flex;
+    align-items: baseline;
+}
+
+.codeTerminal-input {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    outline: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    caret-color: currentColor;
+}

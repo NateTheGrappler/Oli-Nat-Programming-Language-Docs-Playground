@@ -7,9 +7,11 @@ type CodeOutputArray = {text: string; error: boolean}[]
 interface CodeTerminalProps {
     outPutArray: CodeOutputArray,
     ready: boolean,
+    awaitingInput: boolean,
+    handleInputSubmit: (text: string) => void
 }
 
-function CodeTerminal({outPutArray, ready}: CodeTerminalProps)
+function CodeTerminal({outPutArray, ready, awaitingInput, handleInputSubmit}: CodeTerminalProps)
 {
 
     //this is the screen for the computer image, just a div but still
@@ -23,7 +25,7 @@ function CodeTerminal({outPutArray, ready}: CodeTerminalProps)
         {
             screen.scrollTop = screen.scrollHeight;
         }
-    }, [outPutArray])
+    }, [outPutArray, awaitingInput])
 
     return (
         <div className="codeTerminal">
@@ -46,6 +48,24 @@ function CodeTerminal({outPutArray, ready}: CodeTerminalProps)
                             </div>
                         ))
                     )}
+
+                        {/*input line that only exists while the VM is paused inside intake()*/}
+                        {awaitingInput && (
+                            <div className="codeTerminal-inputLine">
+                                <span>{":> "}</span>
+                                <input
+                                    className="codeTerminal-input"
+                                    autoFocus
+                                    spellCheck={false}
+                                    onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                            handleInputSubmit(e.currentTarget.value);
+                                            e.currentTarget.value = "";
+                                        }
+                                    }}
+                                />
+                            </div>
+                        )}
 
                 </div>
             </div>

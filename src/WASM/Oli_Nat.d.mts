@@ -6,15 +6,17 @@ export interface OliNatModule {
     cwrap(
         name: 'runFromSource',
         returnType: 'number',
-        argTypes: ['string']
-    ):  (source: string) => number;
+        argTypes: ['string'],
+        opts: {async: true}
+    ):  (source: string) => Promise<number>;
 }
 
 export interface OliNatOptions {
-  print?: (line: string) => void;
-  printErr?: (line: string) => void;
-  stdout?: (charCode: number) => void;
-  stderr?: (charCode: number) => void;
+    print?: (line: string) => void;
+    printErr?: (line: string) => void;
+    stdout?: (charCode: number) => void;
+    stderr?: (charCode: number) => void;
+    requestInput?: () => Promise<string>;
 }
 
 declare function createOliNat(options?: OliNatOptions): Promise<OliNatModule>;
