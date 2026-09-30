@@ -48,7 +48,7 @@ function NavBar({sections, activeId, isSmallScreen, showToggle, toggleSidebar }:
                 <DocsDropdown sections={sections}/>
                
                 {!isSmallScreen &&
-                    <NavLink to="/docs/contributing" className="navbar-link">
+                    <NavLink to="/docs/contributing/getting-started" className="navbar-link">
                         <span>Contribute</span>
                     </NavLink>
                 }

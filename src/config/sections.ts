@@ -29,7 +29,7 @@ export const sections: Section[] = [
         {slug: 'overview', title: 'Overview'},
         {slug: 'installation', title: 'Installation'},
     ],
-    nextRoute: '/docs/guides',
+    nextRoute: '/docs/guides/syntax',
     nextRouteLabel: 'Basic Guides'
 
  },
@@ -69,7 +69,7 @@ export const sections: Section[] = [
             {slug: 'typing-calling', title: 'Typing & Calling'}, //TODO: this one might be a bit redudant, I'll see when I write the docks
         ]}
     ],
-    nextRoute: '/docs/stdlib',
+    nextRoute: '/docs/stdlib/overview',
     nextRouteLabel: 'Standard Library'
 
  },
@@ -90,7 +90,7 @@ export const sections: Section[] = [
         {slug: 'strings', title: '#pullf String'},          //how to mess around with things it's unfortunately not built in
         {slug: 'utils', title: '#pullf utils'},             //the length and assert functions
     ],
-    nextRoute: '/docs/advanced-guides',
+    nextRoute: '/docs/advanced-guides/recursion',
     nextRouteLabel: 'Advanced Guides'
 
  },
@@ -113,7 +113,7 @@ export const sections: Section[] = [
                 {slug: 'superkeyword', title: "'super' Keyword"}
             ]},
     ],
-    nextRoute: '/docs/system-design',
+    nextRoute: '/docs/system-design/introductionToDesign',
     nextRouteLabel: 'System Design'
  },
 
@@ -148,7 +148,7 @@ export const sections: Section[] = [
         {slug: 'functions',                 title: 'Functions & Natives'}
 
     ],
-    nextRoute: '/docs/contributing',
+    nextRoute: '/docs/contributing/getting-started',
     nextRouteLabel: 'Contribute!'
 
  }

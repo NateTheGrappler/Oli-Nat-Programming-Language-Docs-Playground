@@ -1,0 +1,84 @@
+import banner from '../../assets/Images/Oli-Nat-Logo-Banner.png'
+
+
+<img src={banner} alt="Oli-Nat banner" className="banner" />
+
+
+
+---
+*A small, statically typed language you can run in your browser, and read from source code to bytecode.*
+
+Oli-Nat is a hand-built programming language written in pure C. Source code travels through a full pipeline (scanner, Pratt parser, AST, type checker, bytecode compiler) and runs on a custom stack-based virtual machine with its own garbage collector. Every stage is written from scratch, and every stage is documented. I wrote these docs, and this language, to showcase my passions for low-level programming and learning in general.
+
+[Try it in the playground](https://olinat.net/playground)
+
+---
+
+```c
+#pullf io
+
+class Player
+{
+    make int health = 100;
+    make string name = "hero";
+
+    make empty takeDamage(int amount)
+    {
+        health = health - amount;
+    }
+}
+
+make Player p = Player();
+p.health = p.health - 10;
+println(p.health);
+
+make int x = 10;
+make string greeting = "hello";
+
+if (x > 5)
+{
+    make int y = x + 1;
+    println(y);
+}
+
+for (make int i = 0; i < 5; i++)
+{
+    println(i);
+}
+```
+
+
+```
+Source --> Scanner -> ASTCompiler --> TypeChecker --> ByteCodeCompiler --> GarbageCollector --> VM
+```
+
+- ### Small enough to understand. 
+	 A two-pass compiler, a static type checker, a virtual machine, a mark-and-sweep garbage collector, closures, and classes, and more, all in under [7,000 lines of C](https://github.com/NateTheGrappler/OliNat-Programming-Language), excluding test case files. When I first became interested in language hacking, I was daunted by very large languages. There, I made Oli-Nat as a language that is meant to be read, and the documentation walks through the implementation alongside the features, documenting implementation and personal understanding.
+- *Fun cloc stats: ASTcompiler.c ~ 1,394 lines, vm.c ~ 1,104 lines, typechecker.c ~ 938 lines*
+
+- ### Portable 
+	 Oli-Nat depends on nothing but a C compiler. No LLVM, no parser generators, no external libraries. It builds on `Linux, macOS, and Windows`, and the resulting executable is small and self-contained. [See the Installation Guide Doc](https://olinat.net/docs/installation)
+
+- ### Hackable
+	Because the whole implementation is plain, readable C, adding a feature is approachable if you know a little C. New native functions take a few lines, and each pipeline stage lives in its own file. Oli-Nat is **open-source** under the MIT license, and issues and pull requests are welcome.
+
+- ### Oli-Nat is teachable 
+	In tandem to the flexible compilation options, and the customization, this page includes a [code playground](https://olinat.net/playground), which allows you to write Oli-Nat code inside the browser without compilation. Allowing you to get a good feel for the language, see the syntax, and even mess around with the program!
+
+
+## Mission/Purpose
+I started Oli-Nat in May 2026, a few months after finishing high school and just before beginning my BSc in Computer Science at the University of London. I'd loved programming since I first picked it up in high school, but I wanted to understand what actually happens underneath the code I write. Writing a program language from nil was always this monolithic dragon-like project. A beast to be slain, but one that inspired fear into the idea of starting it. This is inpart as to why the language logo includes a dragon, that and the famous "dragon book" (Compilers Principles, techniques, and tools 2nd Edition). The project was daunting, but I learned so much: how memory is managed, how data structures behave in practice, and how a language turns text into something a machine can run.
+
+The project began as me working through Robert Nystrom's _Crafting Interpreters_, but it didn't stay there for long. As my curiosity grew, so did the language. I added a separate AST stage, a static type checker, typed arrays, classes with inheritance, and a standard library, and I spent a lot of late nights chasing down garbage collector bugs and stack corruption along the way. About two months later, what started as a learning exercise had become a complete, statically typed language with a hand-written bytecode virtual machine, built in pure C with no outside dependencies.
+
+Oli-Nat was never meant to grow this large, and it wouldn't have without the people who contributed ideas, code, and encouragement along the way. More than anything, it taught me how much I enjoy low-level programming, and how much I learn by building something from scratch and refusing to stop until it works.
+
+## Acknowledgments:
+---
+- Oli-Nat's VM design is inspired by Robert Nystrom's _Crafting Interpreters_; Oli-Nat extends it with a separate AST stage, static type checking, typed arrays, a fleshed out stdlib, and more.
+- Users:
+	- Mxnnyy
+	- MXD-K1
+	- Anubhavaanand
+	- Voyagerroc
+- Have all contributed in part to the language, be it adding testcases, bug fixes, or adding to to the stdlib, a huge thank you to them all!

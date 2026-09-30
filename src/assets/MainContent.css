@@ -144,3 +144,15 @@
     border-top: 0.5px solid #2E2A26;
     margin: 32px 0;
 }
+
+
+
+/*The things down below are specific to styles for actual .mdx elements, just easier to put them here then restructure the whole way everything loads in*/
+
+.banner {
+  display: block;
+  width: 100%;
+  max-width: 1000px;
+  height: auto;
+  margin: 0 auto;
+}

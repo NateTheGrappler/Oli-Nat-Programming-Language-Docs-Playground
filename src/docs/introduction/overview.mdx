@@ -1,0 +1,66 @@
+# Overview: 
+
+## Mission/Purpose
+In starting my goal of building a custom programming language, I had initially downloaded the source code for the [ Java Programming Language](https://github.com/openjdk/jdk/tree/master), and I was absolutely overloaded by the hundreds of thousands of lines of code. Written by expert developers over decades of time. I was lost, and I remember the discouragement that I felt by this, it made that ravine between me and my goal that much larger. However I did not give up, and wanted to make a language that would be small and accessible.
+
+With this in mind, **I made Oli-Nat as friendly as possible to someone who would want an example language to learn from**. The language itself was written to be small and readable, only a few thousand lines of C code, with zero dependencies, and easy hack-ability. Separated by each major component to showcase the flow between them. Allowing for someone to see how a source string flows through the scanner to the parser to the type-checker, and gets executed in the vm simply by just opening a file and reading from the top down. The documentation site you are on does not only go over language features and syntax, but also [goes in depth describing the actual implementation of the C code used to create the language](https://olinat/docs/system-design/introductionToDesign)
+
+From how the scanner breaks down source into tokens, how those same tokens are made into Abstract Syntax Trees that get typed and then checked, and so on and so forth. Everything is documented as both a stance of my own growth as a programmer, but also for the hope that someone else would be able to avoid the difficulties and discouragement that can come with a project like creating your own custom VM.
+
+### Small code Snippet
+```c
+#pullf io
+class Vehicle
+{
+    make string brand = "Generic";
+    make int wheels = 4;
+}
+class Car -> Vehicle
+{
+    make string model = "Sedan";
+    make bool isElectric = false;
+}
+
+make Car c = Car();
+for(make int i = 0; i < 10; i++)
+{
+    println(c.brand);
+    println(c.wheels);
+    println(c.model);
+    println(c.isElectric);
+}
+```
+
+
+## Basic Features:
+- Static typing with declarative syntaxs
+- Types include `int, double, float, bool, string`, and their given array versions as denoted with `int[]`, with indexing similar to that of Java
+- Global and local variable declarations with `make` keyword, based on scopes denoted by block statements curly brackets: `{}`
+- if/else statements, for loops, while loops, and general control flow
+- first-class type defined functions with look ahead declarations, in tandem with closures and up-value capture
+- Functions are typed, with checking of return types, as well as parameter inputs and what not
+- Classes which functions as similar to standard C++ (my favorite) function syntax as I can, including typed methods, fields, and default values
+- Classes also have their own state, and have the ability for custom constructor creation, and field/method access using **dot notation**
+- Classes also support inheritance using the `->` operator, which also includes the `this` and `super` keywords for the access of inherited fields and methods
+- String concatenation and O(1) string interning which hashes strings into a global hash on creation allowing for fast indexing, and then also easier memory clean up using the garbage collector
+- An expansive standard library which is very customizable and uses a familiar but still unique `#pullf libName` on request of a good friend of mine 
+
+
+## Standard Library
+
+For more direct information please check out [Standard Library Documentation](https://olinat.net/docs/stdlib/Overview) <br />
+Imported via `#pullf <library>`. Available libraries & their given functions:
+
+| Library   | Contents                                                                                                                                                                                               |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `io`      | `print`, `println`, `intake`                                                                                                                                                                           |
+| `math`    | `sin`, `cos`, `tan`, `sqrt`, `pow`, `floor`, `ceil`, `abs`, `ln`, `log10`, `log2`, `expo`                                                                                                              |
+| `chronos` | `clock`, `time`, `sleep`, `dateString`, `timeString`                                                                                                                                                   |
+| `fileIO`  | `readFile`, `writeFile`, `appendFile`, `fileExists`, `deleteFile`                                                                                                                                      |
+| `types`   | `intToStr`, `intToDouble`, `intToFloat`, `doubleToStr`, `doubleToInt`, `doubleToFloat`, `floatToStr`, `floatToInt`, `floatToDouble`, `strToInt`, `strToDouble`, `strToFloat`, `strToBool`, `boolToStr` |
+| `Strings` | `strLength`, `strContains`, `strSlice`, `strToUpper`, `strToLower`, `strReplace`                                                                                                                       |
+| `utils`   | `length`, `assert`                                                                                                                                                                                     |
+| `stdlib`  | All of the above      
+
+
+***Important Note:*** *due to the differences between WASM and C, certain libraries such as `chronos`, and `fileIO`, might not work properly due to the differences between a regular unix and browser environment*
