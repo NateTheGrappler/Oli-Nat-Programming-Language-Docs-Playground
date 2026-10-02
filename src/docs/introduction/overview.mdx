@@ -33,7 +33,7 @@ for(make int i = 0; i < 10; i++)
 
 
 ## Basic Features:
-- Static typing with declarative syntaxs
+- Static typing with declarative syntax
 - Types include `int, double, float, bool, string`, and their given array versions as denoted with `int[]`, with indexing similar to that of Java
 - Global and local variable declarations with `make` keyword, based on scopes denoted by block statements curly brackets: `{}`
 - if/else statements, for loops, while loops, and general control flow
@@ -62,5 +62,38 @@ Imported via `#pullf <library>`. Available libraries & their given functions:
 | `utils`   | `length`, `assert`                                                                                                                                                                                     |
 | `stdlib`  | All of the above      
 
-
 ***Important Note:*** *due to the differences between WASM and C, certain libraries such as `chronos`, and `fileIO`, might not work properly due to the differences between a regular unix and browser environment*
+
+## Types and Error Example:
+
+| Type     | What type might look like in language |
+| -------- | ------------------------------------- |
+| int      | make int x = 0;                       |
+| double   | make double x = 0.0;                  |
+| float    | make float x = 0.0f;                  |
+| string   | make string x = "Hello World";        |
+| bool     | make bool x = true;                   |
+| int[]    | make int[] = array [1, 2, 3];         |
+| instance | make myClass myInstance = myClass();  |
+| function | make empty myFunction();     |
+### Example of an Error output:
+
+```
+SYNTAX ERROR -- [line 19 at end: Please end all of your expressions with a ';'!]
+```
+
+## Pipeline Overview
+
+Oli-Nat's pipeline is based on clox from _Crafting Interpreters_, with a few key additions. A program moves through five stages, each in its own file.
+
+**1. Scanner** (`scanner.c`). The scanner reads raw source text and breaks it into tokens: keywords like `make`, identifiers, numbers, strings, and symbols.
+
+**2. Parser** (`ASTcompiler.c`). This is the real meat of the language. A Pratt parser walks the token stream, looks up each token in a table of parse rules, and builds Abstract Syntax Trees that capture the structure and order of operations of each expression. It runs in two passes: the first registers every function and class, so you can call a function before it's declared. [AST Compiler docs →](https://olinat.net/docs/system-design/astCompiler)
+
+**3. Type checker** (`typeChecker.c`). Each tree is checked as soon as it's built. Something like `make int a = "b";` is caught at compile time, before the program ever runs.
+
+**4. Bytecode compiler** (`Bytecompiler.c`). This one is much less intimidating than it sounds, because the parser already did the hard work. It walks each tree and emits a compact sequence of opcodes for the VM.
+
+**5. Virtual machine** (`vm.c`). The VM loops over those opcodes and executes them one by one, managing the stack, function calls, and objects along the way. It's really just one big switch statement with a mustache on, trying to look scary.
+
+There's much more under the hood, including the garbage collector, memory management, and debugging tools. All of it is covered in the [System Design docs](https://olinat.net/docs/system-design/introductionToDesign).
