@@ -62,7 +62,7 @@ function MainContent({activeSection, documentationFilePath}: {activeSection?: Se
     return (
         <div className="outerMainContentDiv">
             <div className="doc-content">
-                {notFound && <p>Page not found.</p>}
+                {notFound && <p>Page not found, please allow admin time to fillout page, or contribute to the documentation yourself!.</p>}
                 {DocComponent && <DocComponent />}
             </div>
         </div>
