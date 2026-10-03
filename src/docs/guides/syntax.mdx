@@ -1,0 +1,162 @@
+# Syntax
+
+Oli-Nat's syntax is very similar to ` C++` and `Java`, with some added flair of its own. It generally follows the principles of those two as they are my own personal favorite; with what I think is the easiest to understand syntax. Although it does deviate in some aspects that I believe are beneficial.
+
+The language is able to read any form of txt file, with a `.oli` extension being the preferred option, and the official extension for the language. Oli-Nat is compiled to bytecode and run on a virtual machine, rather than compiled to a native executable like C, but does not read and execute code line by line like Python. It's really most similar to java, but without the created bytecode binaries. It completely ignores white-space, and it does not compile down to an executable; instead it compiles to bytecode and executes from that.
+
+
+
+## Reserved Key Words
+
+A good way to get an understanding of language features and feel is to see all of the reserved keywords and symbols that come along with it, so here they are:
+
+```java
+//keywords
+make int bool float double string class empty for else while if return this pullf true false
+
+//symbols
++ - / * ! || &&  == > < >= <= != //basic operators
++= -= /= *= ++ --                //compound operators
+->                               //inheritance
+```
+
+The `pullf` keyword in particular is a bit special, because it has two versions, a hashed (#pullf) and a regular (pullf) version. The hashed version is used to import functions from the languages [Standard Library](https://olinat.net/docs/stdlib), while the regular version is treated like the `super` keyword in other languages. Being used to reference classes and fields of parent functions.
+
+
+## Comments
+
+Comments in Oli-Nat are very simple, just the tried and true `//` 
+
+```c
+//this is a line comment in Oli-Nat
+```
+
+The line comments in the language are just that, good for single lines, and they tend to end as soon as a new line character is parsed within the code. <br />
+It should be noted that while the `/* */` block comment syntax is not yet entirely supported by the language, the implementation is something that is planned to be added in future releases of the language. Please see the [Contributing Page](https://olinat.net/docs/contributing) if you'd like to be the one to add it.
+
+
+
+## Whitespace
+
+Whitespace, including tabs, spaces and newlines, is ignored by the compiler. Statements are separated by semicolons, not line breaks. This makes the handling of white space very lax, like C or Java, while still keeping good readability.
+
+```java
+#pullf io print("Man, this world looks so linear"); //no new line characters required
+```
+
+This means you can write your entire program all in one line if you wanted to
+
+```java
+#pullf //new lines are ignored inside of expressions
+io 
+
+println
+(
+  "A whole line just to myself!"
+)
+; //semicolons are still required for each expression end however
+```
+
+Or even separate it out by key words even if you really wanted to. This makes it really nice to handle the assault on the eyeballs that is a lot of nested operators and elements in your code.
+
+```java
+#pullf                     io
+
+println
+					(
+"I feel behind."		
+					);
+```
+
+Tabs, indents, and spaces are all totally ignored too, which means that the language can compile in similar ways to something like C or C++, where there isn't much need to worry about spacing between your characters. This means it's also possible to create art with your source code, if that's something you're into.
+
+
+
+## Variable Naming Rules
+
+Naming rules are similar to other programming languages. Identifiers start with a letter or underscore and may contain letters, digits, and underscores. Case is sensitive.
+
+```java
+hi
+camelCase
+PascalCase
+_under_score
+abc123
+ALL_CAPS
+```
+
+The rules are rather standard across all most language instances out there in the world, for a language to help someone learn these are good to have a basic understanding.  <br />
+They also follow the pattern of identifiers where you cannot name one with a digit, or use a reserved keyword as a name; so something like `make int 123myVar = 0;` or `make string class = "xyz";` are not allowed.
+
+
+
+## Blocks
+
+Blocks and scope inside of the language are defined using curly brackets `{}`. They can be used anywhere that a statement can be used, so inside things like **control flow** or **Method and Function bodies**
+
+```java
+if(isAlive && inBox)
+{
+	shrodginer.isShocked();
+}
+else
+{
+	shrodginer.isNotShocked();
+}
+```
+
+Blocks used in this manner are the most common type used inside of the language, and are required for control flow and function definitions, as the parser directly checks for a `{` character after some reserved keywords. <br />
+
+However, there is also the ability to just have block statements without any reserved keywords
+
+```java
+#pullf io
+{
+	println("This is");
+	println("all just");
+	println("One block");
+}
+```
+
+You also have the ability to nest blocks within of each other, the compiler is able to reference variables in outer scopes inside of inner scopes, this process is linear, and the language will continue looking in the next outer scope for your variable reference until it finds it
+
+```java
+#pullf io
+{
+	make int outside = 30;
+	{
+		make int inside = 20;
+		//is able to reference outside variable, no error
+		println(outside); 
+	}
+	//not able to access this variable, throws UNDEFINED ERROR
+	println(inside); 
+}
+```
+
+Lastly, the main difference between how blocks would work between Oli-Nat and other languages like Java or C++, is that there is no need for a `main function`, and you are able to just write global level code without an express entry point <br />
+
+This is the global scope, and the difference between global code and nested scope code inside of blocks, is that in the VM global variables and functions are stored in a hashmap that can be referenced anywhere in the source code. This is unlike local variables which are simply stored on the stack until that given scope is exited.
+
+
+
+## Precedence & Grammar
+
+This portion of the language will be talked about in greater detail in the [system design portion of the documentation](https://olinat.net/docs/system-design), but I think that knowing the "order of operations" for the Oli-Nat language would be a good way for someone to get acquainted with it.
+
+The table below shows which expressions of the language have a *higher precedence*, which defines the priority of when that portion of the expression will first be evaluated. Associativity is the order in which two of the same operator will evaluate, basically start reading from the left or start reading from the right. The precedence values are similar to C.
+
+
+| Precedence | Operator    | Enum Defintion     | Description                                                                                                                 | Associativity |
+| ---------- | ----------- | ------------------ | --------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| 1          | `1.0, "a"`  | `PREC_PRIMARY`     | these are any primary values, like integers, booleans, strings, and identifiers                                             | None          |
+| 2          | `. () []`   | `PREC_CALL`        | These are things like function calls, instance access, as well as indexing of static arrays                                 | Left          |
+| 3          | `- !`       | `PREC_UNARY`       | Unary operations are ones that change the value of the item to their right, so negation or boolean flipping                 | Right         |
+| 4          | `* /`       | `PREC_FACTOR`      | This is where things get a bit more PEMDAS, multiplication and division going  before addition                              | Left          |
+| 5          | `+ -`       | `PREC_TERM`        | This is simple addition and subtraction, resolution of two binary terms interacting                                         | Left          |
+| 6          | `< > <= >=` | `PREC_COMPARISION` | These are the comparision operators that don't really change any values outright, but instead compare them for control flow | Left          |
+| 7          | `==, !=`    | `PREC_EQUALITY`    | The equality operator is below the comparison operators, allowing for simpler syntax when doing comparisions                | Left          |
+| 8          | `&&`        | `PREC_AND`         | The `and` operator, which ties more closely than the following operators                                                    | Left          |
+| 9          | `\|\|`      | `PREC_OR`          | The `or` operator, which ties more closely than the following operators                                                     | Left          |
+| 10         | `=`         | `PREC_ASSIGNMENT`  | Finally, the assignment operator, which is only used for defining or redefining variables                                   | Right         |
+

@@ -1,0 +1,229 @@
+# Types
+
+Oli-Nat is a **statically typed** language. Every variable, parameter, field, and function return has a type that you write out explicitly, and the type checker verifies every expression before your program runs. If you try to put a `string` into an `int`, you find out at compile time, not runtime, which means that the VM can implicitly trust typing, allowing faster execution speeds.
+
+Below are documented the interactions between different types, the different kinds of types in the language, how they interact, as well as fun special tidbits . For seeing on how types are actually resolved and checked in the language, please see the [Documentation Regarding the Typechecker](https://olinat.net/docs/system-design/typeChecker)
+
+
+
+## Overview
+
+| Type                                                 | Example value   | What it holds                                      |
+| ---------------------------------------------------- | --------------- | -------------------------------------------------- |
+| `int`                                                | `42`, `-7`      | Whole numbers (32-bit)                             |
+| `double`                                             | `3.14`, `-0.5`  | Decimal numbers (64-bit, the default for decimals) |
+| `float`                                              | `3.14f`         | Decimal numbers (32-bit, smaller and less precise) |
+| `bool`                                               | `true`, `false` | A true or false value                              |
+| `string`                                             | `"Hello"`       | Text                                               |
+| `int[]`, `double[]`, `float[]`, `bool[]`, `string[]` | `[1, 2, 3]`     | A fixed-size list of values of one type            |
+| _ClassName_                                          | `Player()`      | An instance of a class you've defined              |
+| `empty`                                              | (none)          | "No value", used as a function return type         |
+
+***Important Note:*** *arrays and their types are separate from regular types in Olinat, however they are not fully mentioned here and are more documented in the [Arrays documentation](https://olinat.net/docs/guides/arrays)*
+
+
+
+## Types in Variables
+
+Variables and their declarations have their own specific documentation page (seen [here](https://olinat.net/docs/guides/variables)) where the specifics of how to define them is spoken of over there. <br />
+
+However, each variable declaration is still typed, which is important as Olinat does not resolve typing on it's own, and you must instead assign a type to each variable the moment that it is created.
+
+```c++
+make int score = 0;
+make string name = "Oli-Nat";
+make bool isAwesome = true;
+```
+
+For reassignment of a variable, the type of it does not change, and so you cannot declare a variable as an integer, and then try to reassign it a string value
+
+```java
+make int score = 32;
+score = "New High: 40";
+```
+
+Instead, you would have to do something like declare a new variable, or use one of the prebuilt functions inside of the **type conversion** portion of the language's [standard library](https://olinat.net/docs/stdlib/types)
+
+
+
+## Numbers
+
+There are **three** main number types in Oli-Nat, that being `integers, doubles, and floats`, with the language automatically assigning the type of value that literal is based on how you write it
+
+```java
+make int a = 10; //no decimal point means an integer
+make float b = 10.0f; //a decimal and explicit "f" char means a float
+make double c = 10.0; //a decmial only means a double
+```
+
+*Important Notes*
+- A `float` literal needs to have both the decimal and `f` character. So `10f` won't work, it needs to be `10.0f`
+- Decimal literals require a digit on both sides of the point; `0.5` is valid, but `.5` or `5` are not valid double values
+- For negative values you just the **negation operator** (`-`), it works just as you would expect a regular negative sign to work in basic math
+
+
+
+### Size Differences
+
+`int` values are a whole number that is stored as a C integer under the hood, meaning that it is generally 32 bits in size, and can hold between -2.1 & 2.1 billion, it is caped there so something like
+```java
+#pullf io
+make int x = 100000000000000000;
+println(x); //this prints out 2147483647
+```
+
+`Doubles & Floats` Both hold decimal numbers. A `double` uses 64 bits and is the default you get when you write a decimal. A `float` uses 32 bits, which makes it less precise (roughly 7 significant digits versus a double's 15 to 16). Unless you have a reason to use `float`, use `double`.
+
+
+### Operations with Numbers
+
+There is a general hierarchy with the types of numbers in Oli-Nat which tends to go `int -> float -> double`, so if you have a type later in the chain, it tends to covert the entire expression to that said type. However, this only exists if there is a difference in types, if there is none, the type stays the same
+
+|Left side|Right side|Result|
+|---|---|---|
+|`int`|`int`|`int`|
+|`float`|`float`|`float`|
+|`double`|`double`|`double`|
+|`int`|`float`|`float`|
+|`int`|`double`|`double`|
+|`float`|`double`|`double`|
+The order doesn't matter, so `int * double` and `double * int` both give a `double`.
+
+
+### Division & Comparison
+
+``` java
+println(7 / 2);   //3, not 3.5
+println(7.0 / 2) //3.5
+```
+
+Division by zero is also not allowed in the language, and will result in the following error:
+
+```
+DIVISON BY ZERO ERROR -- Cannot logically divide a number by zero.
+:> Stack trace
+:> [line 2] in <script>()
+```
+
+Comparison of the language follows a pretty loose definition of how integer values are compared, generally if they evaluate out to be the same number when truncated then they are resolved as true. The only exception to this is the comparison between a `double` and a `float`, which is due to floats being internally represented as smaller, as well as having the `f`
+
+``` java
+#pullf io
+println(1 == 1);      //true
+println(1 == 1.0);    //true
+println(1 == 1.0f);   //true
+println(1.0 == 1.0f); //false
+```
+
+
+## Booleans
+
+A `bool` is either `true` or `false`. Booleans come from comparisons and are used in conditions:
+
+```java
+make int age = 20;make bool isAdult = age >= 18;make bool isBanned = false; if (isAdult && !isBanned){    println("Welcome in!");}
+```
+
+Conditions must actually be booleans. Unlike C, numbers don't count as true or false, so `if (1)` is a type error. Write `if (x != 0)` instead. <br />
+
+`&&` (or the word `and`) and `||` (or `or`) only work on booleans, and `!` flips a boolean.
+
+
+## Strings
+
+A `string` type holds text, written in double quotes:
+
+```java
+make string greeting = "Hello, world!";
+```
+
+Currently, there is no support for char types, however they are easily implementable in the future, and if anyone would be interested in [contributing](https://olinat.net/docs/contributing), please do so!
+
+### Supported Escape Sequences
+
+Use a backslash to put special characters inside a string:
+
+| Escape | Meaning         |
+| ------ | --------------- |
+| `\n`   | New line        |
+| `\t`   | Tab             |
+| `\r`   | Carriage return |
+| `\\`   | A backslash     |
+
+``` java
+println("Line one\nLine two"); //this prints out on two lines in the terminal
+```
+
+### Joining strings
+
+`+` joins two strings together:
+
+```java
+make string first = "Oli";
+make string full = first + "-Nat";   // "Oli-Nat"
+```
+
+Both sides **must** be strings. Oli-Nat won't turn a number into text for you, so this doesn't work:
+
+```java
+make int score = 10;
+println("Score: " + score);              // TYPE ERROR
+println("Score: " + intToStr(score));    // fine
+```
+
+### Comparing strings
+
+`==` and `!=` compare the contents of two strings, and they're fast: every string is _interned_ when it's created, so two strings with the same text are the same object, and comparing them is a single check no matter how long they are.
+
+The ordering operators (`<`, `>`, `<=`, `>=`) only work on numbers, so you can't sort strings alphabetically with them.
+
+For more string tools, like getting the length or changing case, see the [Strings library](https://olinat.net/docs/stdlib).
+
+## Class Types
+
+When you define a class, its name becomes a new type you can use like any other:
+
+``` java
+class Player
+{    
+	make int health = 100;    
+	make string name = "hero";
+} 
+
+make Player p = Player(); //custom constructors w/ params are avaliable as well
+println(p.name);
+```
+
+The type checker knows about each class's fields and their types, so `p.health = "full";` is caught at compile time, the same as with a normal variable. Classes have their own documentation section, [Classes](https://olinat.net/docs/guides/classes), which covers methods, constructors, and inheritance.
+
+### `empty`
+
+`empty` means "no value". Its main use is as the return type of a function that doesn't return anything:
+
+```java
+make empty greet(string name)
+{    
+	println("Hello, " + name);
+}
+```
+
+A function with any other return type must return a value of that type on every path. See [Functions](https://olinat.net/docs/guides/functions) for more. <br />
+
+`empty` is a type that is similar to that of null in other languages, however it is still different because it **cannot** be used to declare a identifer without a value, and is only used to reference functions that do not return a value explicitly.
+
+```java
+make empty x;
+//SYNTAX ERROR -- [line 1 at ';': Expected a '=' after you declare a new variable.]
+```
+
+## Common Errors
+
+| Code                   | Problem                           | Fix                              |
+| ---------------------- | --------------------------------- | -------------------------------- |
+| `make double d = 5;`   | `5` is an `int`                   | `make double d = 5.0;`           |
+| `make float f = 1.5;`  | `1.5` is a `double`               | `make float f = 1.5f;`           |
+| `println("x = " + x);` | Can't join a string and a number  | `println("x = " + intToStr(x));` |
+| `make int n;`          | Variables must start with a value | `make int n = 0;`                |
+| `make int[] a = [];`   | Empty arrays have no type         | Give it at least one element     |
+| `if (count)`           | Conditions must be `bool`         | `if (count != 0)`                |
+| `7 / 2` gives `3`      | Integer division                  | `7.0 / 2`                        |

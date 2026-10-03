@@ -1,0 +1,351 @@
+# Control Flow
+
+Control flow decides which chunks of code run, and how many times they run. **Branching** statements decide whether or not to run a piece of code, and **looping** statements run a piece of code more than once.
+
+This page is an overview of how control flow works in Oli-Nat. On the surface it doesn't differ much from C or Java, but how it works underneath, with the compiler emitting jump instructions and then going back to fill in how far each one jumps, was one of my favorite parts of the language to build. If you're curious, see [how control flow really works](https://olinat.net/docs/system-design).
+
+## Truthy & !Truthy
+
+Every branch and every loop has to make a decision: run this code, or don't. That decision is made by evaluating some expression, called the **condition**, and checking its value.
+
+In many languages, this is where the idea of *truthiness* comes in: rules for whether a value that isn't a boolean should count as true or false. The trouble is that truthiness is pretty subjective. Should an empty string count as true? Should `0`? Should `null`? Every language answers these differently, and the answers are a common source of bugs.
+
+Oli-Nat sidesteps the question entirely: **a condition must be a `bool`**. Anything else is a compile-time error.
+
+```c
+if (true)        // a plain boolean value is fine
+{
+
+}
+if (1 >= 2)      // an expression that evaluates to a boolean is fine
+{
+
+}
+if ("")          // TYPE MISMATCH ERROR -- [line 9 at ')': If condition must be a boolean.]
+{
+
+}
+```
+
+If you want to check whether a number is zero or a string is empty, say so directly: `if (count != 0)` or `if (name != "")`. It's a few more characters, but it provides a lot more clarity as to what your code is actually doing.
+
+## Logical Expressions
+
+Logical operators combine or flip boolean values, and they're how you build more complex conditions. Oli-Nat has three, and the first two, unlike most other language, they can also be written as words:
+
+| Operator | Word form | Meaning | Example |
+| -------- | --------- | ------- | ------- |
+| `&&`     | `and`     | `true` only if **both** sides are `true` | `hasKey && doorLocked` |
+| `\|\|`   | `or`      | `true` if **either** side is `true` | `isAdmin or isOwner` |
+| `!`      |           | Flips `true` to `false` and back | `!gameOver` |
+
+Like conditions, logical operators only accept booleans, so `5 && true` is a `TYPE MISMATCH ERROR`.
+
+You'll usually combine them with the comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`), which take two values and produce a `bool`:
+
+```java
+#pullf io
+
+make int age = 20;
+make bool hasTicket = true;
+
+if (age >= 18 && hasTicket)
+{
+    println("Enjoy the show!");
+}
+```
+
+Comparisons bind more tightly than `&&` and `||`, so `age >= 18 && hasTicket` already means `(age >= 18) && hasTicket`. Between the two logical operators, `&&` binds more tightly than `||`, so when you mix them, adding parentheses makes your intent clear. See the [precedence table](https://olinat.net/docs/guides/syntax) for the full order.
+
+### Short-circuiting
+
+`&&` and `||` are **short-circuiting**: the right side is only evaluated if it can still change the answer.
+
+- For `a && b`, if `a` is `false`, the whole expression is already `false`, so `b` is never evaluated.
+- For `a || b`, if `a` is `true`, the whole expression is already `true`, so `b` is skipped.
+
+This is useful for guarding something that would otherwise fail. Here, the array is only indexed once we know the index is in range:
+
+```java
+if (i < length(board) && board[i] == " ")
+{
+    board[i] = "X";
+}
+```
+
+If `&&` didn't short-circuit, `board[i]` would run even when `i` was out of bounds, and the program would stop with an `OUT OF BOUNDS ERROR`.
+
+## If Statements
+
+The simplest conditional statement, both to use and to implement. The humble `if` statement lets you conditionally skip a chunk of code, and in Oli-Nat it looks like this:
+
+```java
+#pullf io
+
+make bool ready = true;
+make bool set = true;
+
+if (ready && set)
+{
+    println("GO!");
+}
+```
+
+The condition inside the parentheses is type checked to make sure it's a `bool`, and then, based on its value, the code that follows is either run or skipped. You can also add an `else`, which runs when the condition is `false`:
+
+```java
+#pullf io
+
+make bool notTrue = false;
+
+if (notTrue)
+{
+    println("This won't run.");
+}
+else
+{
+    println("This will run.");
+}
+```
+
+There's no `elif` keyword like in Python. To check several conditions in a row, you write `else if`:
+
+```java
+#pullf io
+
+make int score = 72;
+
+if (score >= 90)
+{
+    println("A");
+}
+else if (score >= 80)
+{
+    println("B");
+}
+else if (score >= 70)
+{
+    println("C");   //this one runs
+}
+else
+{
+    println("Keep practicing!");
+}
+```
+
+The conditions are checked from top to bottom, and only the **first** one that's `true` runs. Once a branch runs, the rest are skipped, even if their conditions would also be true.
+
+`else if` isn't actually a special keyword. An `else` can be followed by any statement, and an `if` statement is a statement, so `else if` is really just an `else` whose body happens to be another `if`.
+
+### Braces are optional for single statements
+
+The body of an `if`, `else`, `while`, or `for` can be a single statement instead of a block:
+
+```java
+if (lives == 0) println("Game over!");
+```
+
+This is handy for very short checks, but braces are safer. Without them, only the **first** statement belongs to the `if`:
+
+```java
+if (lives == 0)
+    println("Game over!");
+    gameRunning = false;   //NOT part of the if: this always runs
+```
+
+Using braces everywhere avoids this whole class of bug, so that's the style these docs use.
+
+## While Loops
+
+A `while` loop runs its body over and over, for as long as its condition stays `true`:
+
+```java
+#pullf io
+
+make int countdown = 5;
+
+while (countdown > 0)
+{
+    println(countdown);
+    countdown--;
+}
+println("Liftoff!");
+```
+
+The condition is checked **before** every pass through the loop, including the first one. If it starts out `false`, the body never runs at all.
+
+Make sure something inside the loop eventually makes the condition `false`. If nothing does, the loop runs forever. Sometimes that's exactly what you want, like the main loop of a game that keeps going until the player quits:
+
+```java
+make bool gameRunning = true;
+
+while (gameRunning)
+{
+    // read input, update the board, check for a winner...
+    // eventually: gameRunning = false;
+}
+```
+
+## For Loops
+
+A `for` loop packs the three parts of a counting loop into one line:
+
+```java
+#pullf io
+
+for (make int i = 0; i < 5; i++)
+{
+    println(i);   // prints 0, 1, 2, 3, 4
+}
+```
+
+*Breakdown*
+- `make int i = 0;` is the **initializer**. It runs once, before the loop starts
+- `i < 5;` is the **condition**. It's checked before every pass, the same as in a `while` loop, and it must be a `bool`
+- `i++` is the **increment**. It runs at the end of every pass, after the body
+
+The increment can be any expression, so you can count by different amounts or in different directions:
+
+```java
+for (make int i = 0; i <= 100; i += 10) { println(i); }   // 0, 10, 20, ... 100
+for (make int i = 10; i > 0; i--)       { println(i); }   // 10 down to 1
+for (make int i = 1; i < 1000; i *= 2)  { println(i); }   // 1, 2, 4, 8, ... 512
+```
+
+### Loop variable scope
+
+A variable declared in the initializer only exists inside the loop:
+
+```java
+for (make int i = 0; i < 3; i++)
+{
+    println(i);
+}
+println(i);   // UNDEFINED ERROR: i doesn't exist out here
+```
+
+If you need the value after the loop ends, declare the variable before the loop and leave the initializer as an assignment:
+
+```java
+make int i = 0;
+for (i = 0; i < 3; i++)
+{
+    // ...
+}
+println(i);   // 3
+```
+
+### Leaving parts out
+
+All three parts of a `for` loop are optional. Leave a part out, but keep its semicolon:
+
+```java
+make int i = 0;
+for (; i < 3;)     // no initializer and no increment: works like a while loop
+{
+    i++;
+}
+
+for (;;)           // no condition: loops forever
+{
+
+}
+```
+
+A missing condition counts as always `true`, so `for (;;)` is an infinite loop, the same as `while (true)`.
+
+## Stopping a Loop Early
+
+Oli-Nat doesn't have `break` or `continue` yet. Until it does, there are two common ways to get the same effect.
+
+**Use a flag in the condition.** Add a `bool` to the loop's condition, and set it when you want the loop to stop:
+
+```java
+#pullf io
+#pullf types
+
+make string[] names = ["Oli", "Nat", "Bot", "Max"];
+make bool found = false;
+
+for (make int i = 0; i < 4 && !found; i++)
+{
+    if (names[i] == "Bot")
+    {
+        println("Found Bot at index " + intToStr(i));
+        found = true;   // the condition fails on the next check
+    }
+}
+```
+
+**Return from a function.** A `return` leaves the function immediately, including any loop it's in:
+
+```java
+make int indexOf(string[] items, int count, string target)
+{
+    for (make int i = 0; i < count; i++)
+    {
+        if (items[i] == target)
+        {
+            return i;   // leaves the loop and the function
+        }
+    }
+    return -1;          // not found
+}
+```
+
+## Iteration and Syntactic Sugar
+
+*Syntactic sugar* is syntax that doesn't add any new ability to a language. It's just a nicer way to write something you could already write. Oli-Nat has a few pieces of it in its control flow.
+
+**`for` loops are sugar for `while` loops.** Any `for` loop can be rewritten as a `while` loop inside its own block:
+
+```java
+for (make int i = 0; i < 5; i++)
+{
+    println(i);
+}
+
+// does the same thing as:
+
+{
+    make int i = 0;
+    while (i < 5)
+    {
+        println(i);
+        i++;
+    }
+}
+```
+
+The outer braces are why the loop variable disappears when the loop ends. The `for` loop is compiled into the same kind of jump instructions as a `while` loop. It just gives the counting pattern a tidier shape.
+
+**`++`, `--`, and the compound operators are sugar for assignments.** The parser turns `i++` into `i = i + 1`, and `total += x` into `total = total + x`, before anything else sees them. One side effect of this: `i++` evaluates to the **new** value of `i`, like `++i` in C.
+
+**`else if` is sugar, too,** as described above: it's just an `else` whose body is another `if`.
+
+**`and` and `or` are word forms of `&&` and `||`.** The scanner turns both spellings into the same token, so use whichever reads better to you.
+
+## Quick Reference
+
+```java
+// branching
+if (condition) { }
+if (condition) { } else { }
+if (a) { } else if (b) { } else { }
+
+// looping
+while (condition) { }
+for (make int i = 0; i < n; i++) { }
+for (;;) { }                        // infinite loop
+
+// logical operators
+a && b      a and b                 // both true
+a || b      a or b                  // either true
+!a                                  // flip
+```
+
+| Error                                                                  | Cause                                           |
+| ---------------------------------------------------------------------- | ----------------------------------------------- |
+| `If condition must be a boolean.`                                      | The condition isn't a `bool`, e.g. `if (count)` |
+| `An expression involving '&&' must compare two boolean values please.` | Using `&&` or `\|\|` with non-booleans          |
+| `UNDEFINED ERROR` after a loop                                         | Using a `for` loop's variable outside the loop  |

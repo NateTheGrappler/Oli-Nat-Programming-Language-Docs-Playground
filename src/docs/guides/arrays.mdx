@@ -1,0 +1,188 @@
+# Arrays
+
+`Arrays` in Oli-Nat are fixed-size lists of values that all share the same type. They're useful any time you need to keep track of more than one of something: a list of scores, the squares on a [tic-tac-toe board](https://olinat.net/playground), or the names of every player in a game.
+
+```java
+make int[] scores = [90, 85, 77];
+```
+
+*Breakdown*
+
+- `make` signals that a new variable is being created, the same as with any other variable
+- `int[]` is the type. The `[]` after `int` means "an array of `int`s" rather than a single `int`
+- `scores` is the name of the array
+- `= [90, 85, 77];` is the array literal: a comma-separated list of values inside square brackets. **Like every variable, an array must be given a value as soon as it's declared**
+
+Arrays can also be printed, and the output will showcase the entire array w/ elements, as well as the type of it being an array
+``` java
+println([1, 2, 3]); //prints out ARRAY-[1, 2, 3]
+```
+
+## Types & Indexing
+
+### Array Types
+
+Any of the basic [types](https://olinat.net/docs/guides/types) can be turned into an array type by adding `[]`:
+
+|Array type|Example|
+|---|---|
+|`int[]`|`make int[] nums = [1, 2, 3];`|
+|`double[]`|`make double[] prices = [4.99, 12.50];`|
+|`float[]`|`make float[] weights = [0.5f, 1.25f];`|
+|`bool[]`|`make bool[] flags = [true, false, true];`|
+|`string[]`|`make string[] names = ["Oli", "Nat"];`|
+
+Every element in an array must have the same type as the array. The type checker works out an array literal's type from its **first** element, then checks that every other element matches:
+
+```java
+make int[] mixed = [1, "two", 3]; //TYPE MISMATCH ERROR -- [line 2 at ';': All array elements must be the same type.]
+```
+
+This is also why the declared type and the literal have to agree exactly. `[1, 2, 3]` is an `int[]`, so it can't be stored in a `double[]`:
+
+```java
+make double[] d = [1, 2, 3]; //TYPE MISMATCH ERROR -- [line 2 at ';': A variable expression's type must be the same as it's declared type.]
+ 
+make double[] d = [1.0, 2.0, 3.0]; //fine
+```
+
+### Indexing / Reading Elements
+
+You access an element by putting its **index** in square brackets after the array's name. Indexes start at `0`, so the first element is `[0]`, the second is `[1]`, and so on:
+
+```java
+#pullf io 
+make string[] names = ["Oli", "Nat", "Bot"];
+println(names[0]);   //Oli
+println(names[2]);   //Bot
+```
+
+The index can be any expression, as long as it evaluates to an `int`:
+
+```java
+make int i = 1;println(names[i]); //Nat
+println(names[i + 1]);            //Bot
+println(names[1.0]);              //INDEX ERROR: an index must be an int
+```
+
+#### Out of bounds
+
+Arrays always know their own size, and every access is checked. Reading or writing an index that doesn't exist, including negative indexes, stops the program:
+
+```java
+make int[] nums = [1, 2, 3];
+println(nums[3]); 
+// OUT OF BOUNDS ERROR -- You cannot index outside of an array's defined size
+```
+
+This is a runtime error rather than a compile-time one, because the index usually isn't known until the program runs. It's one of the big safety differences from C, where reading past the end of an array silently reads whatever memory happens to be next to it.
+
+
+
+## Length & Looping
+
+`length`, from `#pullf utils` (see [documentation](https://olinat.net/docs/stdlib/utils)), returns how many elements an array has. Combined with a `for` loop, it lets you visit every element:
+
+```java
+#pullf io
+#pullf utils
+
+make int[] scores = [90, 85, 77, 64];
+make int total = 0;
+
+for (make int i = 0; i < length(scores); i++)
+{ 
+	total += scores[i];
+}
+
+println(total); //316
+```
+
+Use `i < length(scores)`, not `i <= length(scores)`. Because indexes start at `0`, the last valid index is always one less than the length.
+
+## Array Behavior
+
+An important thing to know about arrays inside of Oli-Nat is that under the hood, they are stored as a **reference** to an array object that lives on the programs heap <br />
+
+This means that whenever you create a new array and assign it to a variable, you are not actually storing that array in said variable, but are instead storing a pointer/reference to the array in question.
+### Shallow Copies
+
+The arrays have the behavior of pointing to a heap allocated object in the system runtime means that there are implications on how they are copied in the language.
+
+```java
+#pullf io
+
+make int[] a = [1, 2, 3];
+make int[] b = a; //creates a shallow copy of a
+
+b[0] = 99;
+println(a[0]); //prints out 99
+```
+
+Whenever you try to produce a copy of a static array by trying to assign it to a new variable, you do not create an entirely new `ObjStaticArray` inside of the VM, you instead pass over the reference of the array to the new variable <br />
+
+This is the same way that arrays would behave in languages like Java, JavaScript, or Python. Which makes it lighter on the runtime and language as a whole, but it does give the trade off of sometimes confusing ideas when it comes to the copying of an array
+
+For create a **real copy** the thing that I opted to do can actually be seen in the **tic-tac-toe** example of the [playground](https://olinat.net/playground), where you can call a function to change the values of a newly created array and then return that as a result in a function
+
+```java
+#pullf io
+
+make int[] copyOf3(int[] src)
+{
+    make int[] dst = [0, 0, 0];
+    for (make int i = 0; i < 3; i++)
+    {
+        dst[i] = src[i];
+    }
+    return dst;
+}
+
+make int[] a = [1, 2, 3];
+make int[] b = copyOf3(a);
+b[0] = 99;
+println(a[0]);   //1, because a is untouched
+```
+
+Generally it is planned to have something like this be a future native function, so that way you can simply pass in your own array and then get back a new copy of that array with the same values, but for the time being it makes an important distinction between implementation.
+
+### In Functions
+
+Arrays in functions work basically the same as regular variables do, and if you want to learn more about functions as a whole check out either the [Regular Function Guide](https://olinat.net/docs/guides/functions) or the more detailed [Functions under the hood](https://olinat.net/docs/system-design/functions) documentation <br />
+
+They only face one real difference, that being the fact that they are still passed in as a reference, and not a totally separate created value. So any changes that happen to the array while it is inside the function, change it for the rest of the program as well.
+
+```java
+#pullf io
+
+make int[] x = [1, 2, 3];
+println(x); //prints ARRAY-[1, 2, 3]
+
+make empty arrayFunc(int[] array)
+{
+    array[0] = 32;
+    return;
+}
+
+arrayFunc(x);
+println(x); //prints ARRAY-[32, 2, 3]
+```
+
+As a general given, and as can be seen in the above code example where a real copy of an array is created in a function, whenever an array is returned from a function, it also returns a pointer to that array as an object in the program's memory heap. This is why you need to distinctly make a new array inside of the function <br />
+
+For garbage collector reasons, this makes it a bit interesting to clear out each of the unused arrays, the GC needs to somehow find a way to see if an array is still accessible somehow, even with the distinction of it living on the heap instead of the program's stack, see the [garbage collector documentation](https://olinat.net/docs/system-design/markSweep)
+
+## Current Limitations
+
+Arrays are still one of the more actively developed parts of the language, so there are a few things they can't do yet:
+
+- **Fixed size.** An array's size is set when it's created, and elements can't be added or removed afterwards.
+- **No empty array literals.** `make int[] a = [];` is a `TYPE ERROR`, because there's no first element to work out the type from.
+- **No nested arrays.** Arrays of arrays, like `int[][]`, aren't supported yet. A 2D grid can be stored as a flat array instead, where row `r` and column `c` live at index `r * width + c`.
+- **No arrays of class instances.**
+- **No compound operators on elements**, as described above.
+- **Array literals are limited to 255 elements.**
+- **Don't compare arrays with `==`.** It passes the type checker, but fails at runtime.
+
+
+### See [System Design Docs for Arrays](https://olinat.net/docs/system-design/) for under the hood implementation of Arrays

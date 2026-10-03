@@ -1,0 +1,98 @@
+# Variables
+
+`Variables` in Olinat, like many other languages are named slots for storing different values. There are 4 main points to each variable definition:
+
+```java
+make int x = 32;
+```
+
+*Breakdown*
+- `make` is a special keyword that is used to signify that a variable creation is happening, it makes the language read better than just saying the type outright
+- `int` this is the portion of the declaration that tells the type checker what kind of type the upcoming identifier is supposed to evaluate to
+- `x` this is the name of the identifier and can be anything you'd like, see [syntax](https://olinat.net/docs/guides/syntax) for different naming conventions of identifiers
+- `= 32;` is then the assignment portion of the declaration, **each variable must be assigned a value as soon as it is declared**, you cannot declare a variable like `make int x;`
+
+The up above creates a variable in either a global, or one of the local, scopes. One a variable has been declared, as long as it is still within a valid scope, you can call it by it's name, as you would expect
+
+```java
+#pullf io
+make int x = 32;
+make int y = 3;
+println(x * y); //prints out 96
+```
+
+
+
+## Scope
+
+A **scope** inside of the Olinat language is basically the point of existence for any code. Olinat follows something called *true block scope* where in which a variable exists from the point of where it is defined, until the end of the [block](https://olinat.net/docs/guides/syntax) (defined by `{}`) that encompasses it.
+
+```java
+#pullf io
+{
+	println(x); //throws an undefined error
+	make int x = 32;
+	println(x); //prints out 32 just fine
+}
+println(x); //with the exit of the scope, the variable "x" is no longer defined, so this errors
+```
+
+Olinat is a bit different from languages like C++ or Java, in the fact that there is a **Global Scope** in which a function or variable that is defined here is `top-level`, and stored in a `globals hashmap` defined inside of the VM. This means that you can access them from any scope at anytime. <br />
+
+Any and all variables that are not defined in this top level `<script>` function, are then therefore just **local** meaning that they are defined on the VM's Stack, and exist only as long as that block does. Local variables take precedence within of their scope, meaning that the language checks from the inner most scope to the outer most scope.
+
+```java
+#pullf io
+
+make string a = "outer";
+{
+  make string a = "inner";
+  println(a); //prints out inner
+}
+println(a); //prints out outer
+```
+
+In the world of language hacking, this is a concept known as *shadowing* and can look like an error, even though technically it isn't, it's usually just something you end up doing by accident.
+
+``` java
+#pullf io
+{
+  make string a = "inner";
+  make string a = "inner2";
+  println(a); //prints out inner2
+}
+
+```
+
+Variables within of the same scope can be declared twice over, this is basically the same thing as a assignment, since the VM looks through the location of each variable in the stack, the variable that was defined later is the one closer to the top of the stack, so when the VM goes to search through it's stack for the given variable, it would find the one that was defined latest in the code first, assigning that value to said variable. <br />
+
+The thing is however, that the difference between this and reassignment is that it does not change the given value, just creates a new one, so the original is sitting on the stack, not accessible by anything, and gets cleaned up by the [garbage collector](https://olinat.net/docs/system-design/markSweep)<br />
+
+Technically this behavior is a bit finicky, it could be an error, and it could also not be an error, the reason why I chose to keep it in for this language implementation is because it gives a decent example of what happens to strings/other things that are no longer accessible and discarded by the GC.
+
+
+
+## Assignment
+
+After a variable has been declared, you can change it's value, or assign a new value to it, using the `=` operator
+
+```java
+make string a = "I love";
+a = "Programming Languages";
+```
+
+This walks up the given scope stack to find the place where the named variable is declared. Let it be known that it is an error to try to assign a value to a variable that does not exist yet, and it is also an error to assign a value of a different type to an existing variable as well
+
+```java
+make string a; //SYNTAX ERROR -- [line 4 at ';': Expected a '=' after you declare a new variable.]
+
+a = 32; //| TYPE MISTMATCH ERROR | at line 6: You cannot try to give a different type to an existing variable!]
+```
+
+An assignment (and a definition as well) can have an entire expression be the thing that is used to define or assign a new value to a variable, as long as the typing is correct. So something like `make int x = 32 * 1 / 5 + 7` will evaluate out to a single integer value, you can even do things like assign values to variables while they are passed in parameters to functions
+
+```java
+#pullf io
+make string a = "hello";
+println(a = "world"); //prints out world
+```
