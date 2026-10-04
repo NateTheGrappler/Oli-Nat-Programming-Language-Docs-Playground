@@ -1,0 +1,248 @@
+# Functions
+
+Like many modern languages, functions in Oli-Nat serve their purpose in capturing a portion of code so that way it is reusable and callable throughout the program. Oli-Nat supports both `methods` *and* `functions` <br />
+
+The difference between the two is not too large, but still significant of to take note. Methods are inner class functions that can manipulate state within of a class instance. Given the class based nature of Oli-Nat, a lot of programs would use these, but regular functions are important as well. <br />
+
+Methods and functions are similar in nature and definition, there a few key differences, and mostly functions themselves are going to be covered in this portion of the documentation. Please see the [method documentation page](https://olinat.net/docs/guides/defintions-methods) for detailed method explanation.
+
+
+
+## Creating a Function Definition
+
+Functions in Oli-Nat are defined in the following way
+
+```java
+make int add(int a, int b)
+{
+	return a + b;
+}
+```
+
+*Breakdown*
+- `make` is a keyword that is inherit to the Oli-Nat programming language, and is used in a declaration of every single instance, whenever you want to borrow a piece of memory, you use it.
+- `int` specifies the return type of the function, since the language is typed, each function needs to inherently specify the returning value so that way functions can be used inside of expressions without type checks at runtime
+- `add(int a, int b)` is the actual function definition, with the name of the function as well as the parameters, which are greater described below in the next portion of the documentation
+- `{  return a+b ;}` is then the block portion of a function, each function definition must have a following block statement that defines the code that would belong to that block.
+
+### Function Calling
+
+Functions are then called using the `()` call operator after the name of the given function. All functions are defined in a hash-map, and so if a function is defined in a given scope, it is generally accessible anywhere. 
+
+```java
+#pullf io
+
+make int result = add(1, 2);
+make int result2 = add(result, 5) / 2;
+println(result); //prints out 3
+println(result2); //prints out 4
+```
+
+As can be seen here, functions can be used directly by the simple use of the `()` operator. Functions can be called with parameters or without, which is described in greater detail in the below portion of the documentation. <br />
+
+
+
+## Function Parameters
+
+Parameters are little portions of data that you pass into the function for it to be able to read and manipulate them. Inside of Oli-Nat, function parameters are typed and strictly definined in the function definition. <br />
+
+This means that a function's definitions needs to define all of the parameters that function will take, and when calling that function, all of those parameters need to be put in
+
+```java
+make int damagePlayer(int playerHealth, int DamageDealt) //defined params
+{
+	//function logic
+	make int HP = playerHealth - DamageDealt;
+	if(HP < 0) { return 0; }
+	else { return HP; }
+}
+
+make int newHealth = damagePlayer(50, 20); //exactly 2 parameters that are ints have to be passed in
+
+make int newHealth = damagePlayer(50); //| UNDEFINED ERROR | at line 13: Function call parameters amount does not match function definition.]
+
+make int newHealth = damagePlayer(50, 20.0f); //| TYPE ERROR | at line 15: An arguement of differing type was found in function call. Please double check function input.]
+```
+
+A function's parameters are checked before your program ever runs, by the [type checker](https://olinat.net/docs/system-design/typeChecker) and the [AST Compiler](https://olinat.net/docs/system-design/astCompiler). Every call has to pass exactly the number of arguments the function asks for, and each one has to match its parameter's type exactly. As with variables, there's no automatic conversion, so passing an `int` to a `double` parameter is an error. Use the [conversion functions](https://olinat.net/docs/guides/types) if you need to change a value's type first.``
+
+Parameters behave like local variables inside the function's body. They exist only while the function is running, and they disappear when it returns.
+
+### Arrays and class instances as parameters
+
+Parameters aren't limited to the basic types. Arrays and class instances can be passed into functions too
+
+```java
+#pullf io
+
+class Player
+{
+    make int health = 100;
+    make string name = "hero";
+}
+
+make empty heal(Player p, int amount)
+{
+    p.health = p.health + amount;
+}
+
+make int sum(int[] values, int count)
+{
+    make int total = 0;
+    for (make int i = 0; i < count; i++)
+    {
+        total = total + values[i];
+    }
+    return total;
+}
+
+make Player hero = Player();
+heal(hero, 25);
+println(hero.health); //125
+
+println(sum([1, 2, 3], 3)); //6
+```
+
+*Note: the above code currently has a type-checker bug where the field access of a passed in class instance leads to a type error, this is a bug, and is being worked on to be fixed, I just have a lot of stuff going on with school and will fix it shortly*
+
+To use a class as a parameter type, write the class's name where the type would go, like `Player p` above. Declare the class **before** any function that uses it as a parameter type, so the compiler already knows the class exists when it reaches the function.
+
+### Values vs. references
+
+How a parameter behaves depends on its type. Basics are copied since they do not take up much memory, and more complex items are passed by reference.
+
+**Basic values are copied.** When you pass something like an `int`, `double`, `float`, or `bool`, the function gets its own copy of the value. Changing the parameter inside the function has no effect on the variable that was passed in
+
+```java
+#pullf io
+
+make empty tryToChange(int n)
+{
+    n = 999;   //only changes the function's own copy, not passed in x
+}
+
+make int x = 5;
+tryToChange(x);
+println(x);    //still 5, it wasn't changed in tryToChange();
+```
+
+Strings behave the same way in practice. Under the hood a string is an object, but strings can never be changed once they're created, so there's no way for a function to modify the caller's string. This is something that might eventually be added to the language, like with string indexing and what not however.
+
+**Arrays and class instances are passed by reference.** An array or instance variable doesn't hold the data itself. It holds a reference to an object on the heap. When you pass one into a function, the function gets a copy of that *reference*, which points at the **same** object. Any changes the function makes to the array's elements or the instance's fields are visible to the caller afterwards. That's why `heal` in the example above changed `hero.health`.
+
+```java
+#pullf io
+
+make empty clear(int[] arr)
+{
+    arr[0] = 0; //changes the caller's array
+}
+
+make int[] data = [7, 8, 9];
+clear(data);
+println(data[0]); //0
+```
+
+This is the same way arrays and objects work in Java, JavaScript, and Python. It means large arrays never have to be copied just to be passed around, but it also means a function can change your data when you might not expect it. If you need a function to work on its own copy, see [making a real copy](https://olinat.net/docs/guides/arrays) on the Arrays page.
+
+
+
+## Return Values
+
+A `return` statement ends the function immediately and hands a value back to wherever the function was called:
+
+```java
+make string grade(int score)
+{
+    if (score >= 90) { return "A"; }
+    if (score >= 80) { return "B"; }
+    return "C";
+}
+```
+
+As soon as a `return` runs, nothing after it in the function runs. That makes early returns a clean way to handle special cases at the top of a function, like the first two checks above.
+
+### The return value must match the return type
+
+The value you return has to match the function's declared return type exactly:
+
+```java
+make double half(int n)
+{
+    return n / 2;
+    //TYPE ERROR: A return statement should match the type of it's parent function.
+}
+```
+
+`n / 2` is an `int`, but the function promises a `double`. As with assignment, there's no automatic conversion, so return `intToDouble(n) / 2.0` instead.
+
+Functions can return any type a variable can hold, including arrays and class instances:
+
+```java
+make int[] firstThree()
+{
+    return [1, 2, 3];
+}
+
+make Player makePlayer()
+{
+    make Player p = Player();
+    p.name = "Oli";
+    return p;
+}
+```
+
+Returned arrays and instances are references, just like when they're passed in, so returning one never copies it.
+
+### Every path must return
+
+A function with a return type other than `empty` must return a value on every path through it. If the program ever reaches the end of such a function without hitting a `return`, it stops with a runtime error:
+
+```java
+make int sign(int n)
+{
+    if (n > 0) { return 1; }
+    if (n < 0) { return -1; }
+    // forgot the n == 0 case
+}
+
+sign(0);
+//MISSING RETURN ERROR -- Every single function must have a return statement!!
+```
+
+This is checked when the program runs, not at compile time, so the error only shows up if that path is actually taken. In the example, `sign(5)` and `sign(-5)` work fine, and only `sign(0)` fails. Ending a function with a final `return` that covers every remaining case avoids the problem.
+
+### `empty` functions
+
+A function that doesn't need to give anything back uses `empty` as its return type:
+
+```java
+#pullf io
+
+make empty greet(string name)
+{
+    println("Hello, " + name + "!");
+}
+
+greet("Nat");
+```
+
+An `empty` function doesn't need a `return` at all. It simply ends when it reaches the end of its body. You can still use a bare `return;` to leave early:
+
+```java
+make empty printPositive(int n)
+{
+    if (n <= 0) { return; }   // nothing to print
+    println(n);
+}
+```
+
+A bare `return;` is only allowed in `empty` functions. In any other function it's a `TYPE ERROR`, since a value is required. And `return` can't be used in top-level code at all, because top-level code isn't inside a function.
+
+
+
+# [Function Implementation](https://olinat.net/docs/system-design/functions)
+
+Function implementation inside of the VM was one of the most challenging portions of the writing of the VM, and so I thought it deserved a special shout-out here. <br />
+
+The implementation of functions meant moving from only ever reading one bytecode array to having to hop in between different ones, and jumping back and forth whenever each function was finished. This was basically a whole rewrite of the entire VM at the time and was absolutely a nightmare for the first time I did it, with a lot of bugs. They still are not perfect, and a new bug was even found in the writing of this documentation, but absolutely worth a read if you are interested in how programming languages work under the hood.
