@@ -15,7 +15,7 @@
 
 
 .playground-mainContent--stacked {
-    flex-direction: column;
+    flex-direction: column-reverse;
     overflow-y: auto;
 }
 
@@ -46,7 +46,7 @@
 }
 
 .playground-mainContent--stacked .playground-inputContent {
-    flex-direction: column;
+    flex-direction: column-reverse;
     flex: 0 0 auto;
     min-height: 0;
 }
