@@ -12,3 +12,35 @@
     min-height: 0;
     gap: 10px;
 }
+
+
+.playground-mainContent--stacked {
+    flex-direction: column;
+    overflow-y: auto;
+}
+
+.playground-mainContent--stacked .playground-inputContent {
+    flex: 1 0 auto;
+    min-height: 300px;
+}
+
+.playground-mainContent--stacked .codeTerminal {
+    justify-content: center;
+    width: 100%;
+    padding: 12px 8px;
+}
+
+.playground-mainContent--stacked .codeTerminal-monitor {
+    width: 100%;
+    height: auto;
+    container-type: inline-size; 
+}
+
+.playground-mainContent--stacked .codeTerminal-Computer {
+    width: 100%;
+    height: auto;
+}
+
+.playground-mainContent--stacked .codeTerminal-screen {
+    font-size: clamp(10px, 3cqw, 16px);
+}

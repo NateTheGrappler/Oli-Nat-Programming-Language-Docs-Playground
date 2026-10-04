@@ -53,7 +53,7 @@ function Layout() {
                 {/*render the playground if the specific route for it is git, otherwise hit the regular docs displays */}
                 {isPlayground ? 
                 (
-                    <Playground/>
+                    <Playground isSmallScreen={isSmallScreen}/>
                 ) : 
                 (
                     <> 

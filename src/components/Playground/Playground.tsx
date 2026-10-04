@@ -7,9 +7,14 @@ import { useState, useEffect, useRef } from 'react';
 //import the WASM executable
 import createOliNat from '../../WASM/Oli_Nat.mjs'
 
+interface playgroundProps
+{
+    isSmallScreen: boolean;
+}
+
 
 //main parent component that encompasses the content that gets seen by the /playground route
-function Playground()
+function Playground({isSmallScreen}: playgroundProps)
 {
     const [code, setCode] = useState('#pullf io\nprintln("Hello Dear User!");');
     const [codeOutput, setCodeOutput] = useState<{text: string; error: boolean}[]>([]);
@@ -128,8 +133,8 @@ function Playground()
 
     return (
 
-        <div className = "playground-mainContent">
-            
+        <div className={`playground-mainContent ${isSmallScreen ? "playground-mainContent--stacked" : ""}`}>
+
             <div className = "playground-inputContent">
                 <TestCases changeCode={setCode}/>
                 <CodeEditor code={code} changeCode={setCode} runCode={runProgram}/>
