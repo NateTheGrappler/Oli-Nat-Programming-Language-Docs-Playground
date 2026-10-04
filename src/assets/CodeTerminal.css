@@ -5,6 +5,7 @@
     flex: 0 0 auto;
     min-height: 0;
     box-sizing: border-box;
+    overflow: hidden; 
 }
 
 .codeTerminal-monitor {

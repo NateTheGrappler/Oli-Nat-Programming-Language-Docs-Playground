@@ -44,3 +44,20 @@
 .playground-mainContent--stacked .codeTerminal-screen {
     font-size: clamp(10px, 3cqw, 16px);
 }
+
+.playground-mainContent--stacked .playground-inputContent {
+    flex-direction: column;
+    flex: 0 0 auto;
+    min-height: 0;
+}
+
+.playground-mainContent--stacked .playground-inputContent > :first-child {
+    width: 100%;
+    flex: 0 0 auto;
+}
+
+.playground-mainContent--stacked .codeEditor {
+    flex: 0 0 auto;
+    height: 60vh;
+    min-height: 320px;
+}
