@@ -35,8 +35,17 @@ function NavBar({sections, activeId, isSmallScreen, showToggle, toggleSidebar }:
                 )}
 
                 {/*render the logo and name no matter what */}
-                <img src={logo} alt="Oli-Nat Logo" className="navbarLogo" />
-                <span className="navbar-name">Oli-Nat</span>
+                <NavLink to="/" className="navbarLogo" aria-label="Home">
+                    <img src={logo} alt="Oli-Nat Logo" className="navbarLogo" />
+                </NavLink>
+
+                <NavLink to="/" className="navbar-name" aria-label="Home">
+                    {!isSmallScreen &&
+                        <span className="navbar-name">Oli-Nat</span>
+                    }
+                </NavLink>
+
+
 
                 {/*Trim dir path whenever its too small to save screen space */}
                 {!isSmallScreen && <span className="navbar-breadcrumb">{breadcrumb}</span>}
@@ -67,10 +76,12 @@ function NavBar({sections, activeId, isSmallScreen, showToggle, toggleSidebar }:
                     </a>
                 }
 
+                {!isSmallScreen && 
+                    <NavLink to="/" className="navbar-link navbar-home-link" aria-label="Home">
+                        <svg className={!isSmallScreen? "navbar-home-icon" : "navbar-home-icon-small"} fill="currentColor" xmlns="http://www.w3.org/2000/svg"  viewBox="0 0 48 48" width="48px" height="48px"><path d="M39.5,43h-9c-1.381,0-2.5-1.119-2.5-2.5v-9c0-1.105-0.895-2-2-2h-4c-1.105,0-2,0.895-2,2v9c0,1.381-1.119,2.5-2.5,2.5h-9	C7.119,43,6,41.881,6,40.5V21.413c0-2.299,1.054-4.471,2.859-5.893L23.071,4.321c0.545-0.428,1.313-0.428,1.857,0L39.142,15.52	C40.947,16.942,42,19.113,42,21.411V40.5C42,41.881,40.881,43,39.5,43z"/></svg>
+                    </NavLink>
+                }
 
-                <NavLink to="/" className="navbar-link navbar-home-link" aria-label="Home">
-                    <svg className={!isSmallScreen? "navbar-home-icon" : "navbar-home-icon-small"} fill="currentColor" xmlns="http://www.w3.org/2000/svg"  viewBox="0 0 48 48" width="48px" height="48px"><path d="M39.5,43h-9c-1.381,0-2.5-1.119-2.5-2.5v-9c0-1.105-0.895-2-2-2h-4c-1.105,0-2,0.895-2,2v9c0,1.381-1.119,2.5-2.5,2.5h-9	C7.119,43,6,41.881,6,40.5V21.413c0-2.299,1.054-4.471,2.859-5.893L23.071,4.321c0.545-0.428,1.313-0.428,1.857,0L39.142,15.52	C40.947,16.942,42,19.113,42,21.411V40.5C42,41.881,40.881,43,39.5,43z"/></svg>
-                </NavLink>
 
             </div>
 

@@ -1,0 +1,125 @@
+
+# IO (Input / Output)
+
+The input and output library is a very small, but still very useful library. It was one of the first natives added to the language, and is used to intake and output text to whatever terminal the language is running in. <br />
+
+This is particularly useful for things like debugging, or making small fun terminal applications like the [tic tac toe game](https://olinat.net/playground) that you can try out in the playground of this website
+
+
+## print();
+
+This function takes in generally any argument of any type, being an array, a boolean, a class instance, all of those kinds of things, and then prints them out to the terminal. You would use it in the following way:
+
+```java
+#pullf io
+print("Hello World");
+```
+
+And some of the output that you would get in the terminal for different prints are the following:
+
+| Input           | Type           | Output               |
+| --------------- | -------------- | -------------------- |
+| `"hello world"` | string         | `:> hello world`     |
+| `2`             | int            | `:> 2`               |
+| `2.0`           | double         | `:> 2.000000`        |
+| `2.0f`          | float          | `:> 2.000000f`       |
+| `player`        | class instance | `:> INSTANCE-Player` |
+| `true`          | boolean        | `:> true`            |
+| `[1, 2, 3]`     | array          | `:> ARRAY-[1, 2, 3]` |
+The output for most of these is meant to be used for debugging, and hence why things like Arrays or class instances which live on the heap have the actual thing that they are, alongside their given value, printed out, instead of just their value like other languages do.
+
+### Under the Hood for print();
+
+```c
+Value printNative(int argCount, Value* args, struct Vm* vm)
+{
+    printValue(args[0]);
+    return CREATE_EMPTY_VAL();
+}
+```
+
+The above is the actual native c function that gets called whenever a user calls `"print()"` in Olinat, it is incredibly simple for the fact that it just takes the first argument, passes it over to by debugging function `printValue` which just prints it out using the c standard `printf`, and that's about it really
+
+## println();
+
+This function is not much different from the `print()` function up above it, and is generally just used to make it so you do not have to include a `\n` new line character each time you want to print something out. <br />
+
+This function also has only a single parameter of any type, same as `print()` and has an empty return value, the same table of input and output that applies to the print function applies to println() as well
+
+```java
+#pullf io
+
+//prints :> HelloWorld in terminal
+print("Hello"); 
+print("World"); 
+
+//prints 
+//:> Hello
+//:> World
+println("Hello"); 
+println("World"); 
+```
+
+As can be seen above, the only real difference is that `print()` prints out the text buffer, or whatever instance you put in as the parameter onto the same line, while `println()` just puts it onto the next line in the terminal
+
+### Under the hood for println();
+
+```c
+Value printlnNative(int argCount, Value* args, struct Vm* vm)
+{
+    printValue(args[0]);
+    printf("\n");
+    fflush(stdout);
+    return CREATE_EMPTY_VAL();
+}
+```
+
+This is basically the same as `print()` the only difference is that there is an added on `\n` character printed out right afterward, and then the text buffer is simply flushed out for better rendering.
+
+## intake()
+
+This function is similar to that of the input() function in python and other languages like it. It basically pauses the program for a second or two, awaiting for the user to type into the terminal, and then outputting whatever was inputted as a string. <br />
+
+This function has *one or zero* parameters, meaning that a parameter is optional, or a string that can be used as a prompt for the user to let them know that there is now an input field. This then returns a `string` type of whatever the user put in.
+
+```java
+#pullf io
+
+make string result = intake(); //pauses program waiting for input
+
+make string prompted = intake("How old are you?: "); //prints out the text and then waits for the input on the next line. 
+```
+
+The function can either print out whatever prompt they wish, and then get the result back as a string, or use the type conversation functions in order to make it into an int or whatever you would like.
+
+### Under the hood for intake();
+
+```c
+Value intakeNative(int argCount, Value* args, struct Vm* vm)
+{
+    if (argCount > 0 && IS_STRING(args[0])) { printf("%s", AS_CSTRING(args[0])); fflush(stdout); } //print prompt if one
+
+    char buffer[1024];
+    if (fgets(buffer, sizeof(buffer), stdin) == NULL)
+    {
+        //error
+        ObjString* emptyString = copyString("", 0, vm);
+        return CREATE_OBJECT_VAL((Obj*)emptyString);
+    }
+
+    int length = (int)strlen(buffer);
+    if (length > 0 && buffer[length - 1] == '\n')
+    {
+        buffer[length - 1] = '\0';
+        length--;
+    }
+
+    ObjString* result = copyString(buffer, length, vm);
+    return CREATE_OBJECT_VAL((Obj*)result);
+}
+
+```
+
+This one is definitely the most complicated under the hood, especially when compared to the other two IO functions in this library. The first check finds out if there is in fact an argument that was passed into the function, and if it was, it has to be a string as per type checker safety. This way you can be sure it is a C string and can be treated as such. <br />
+
+After this occurs, you allocate a buffer to store the pure char array that you are going to be getting as input from the user. The language still uses C under everything, and this is no different. The raw c string is interned and tossed into the global string hashmap inside of the VM, and then converted into the object orientation that the language understands, getting returned as a new object.

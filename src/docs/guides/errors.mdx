@@ -1,0 +1,349 @@
+# Error Handling
+
+Every programmer writes code that doesn't work. What matters is how quickly the language tells you *what* went wrong and *where*. Oli-Nat tries to catch as many mistakes as possible before your program even starts running, and when something does go wrong at runtime, it stops and tells you exactly which line and which function it was in.
+
+Oli-Nat doesn't have `try` / `catch` (yet), so an error always stops the program. This page goes over the different kinds of errors, how to read them, and the most common messages you'll run into, a few of which have a bit of personality.
+
+## Two Kinds of Errors
+
+Errors in Oli-Nat happen at one of two times:
+
+| | **Compile-time errors** | **Runtime errors** |
+| --- | --- | --- |
+| When | Before the program runs | While the program is running |
+| Caught by | The scanner, parser, or type checker | The virtual machine |
+| Examples | Missing semicolons, type mismatches, undefined variables | Dividing by zero, indexing past the end of an array |
+| Does any code run? | No, nothing runs until every compile error is fixed | Yes, everything up to the failing line has already run |
+| Exit code | `70` | `65` |
+
+Because Oli-Nat is statically typed, a lot of mistakes that would be runtime crashes in a language like Python or JavaScript are caught at compile time instead. If your program compiles, you already know that every variable exists, every function is called with the right arguments, and every value has the type it's supposed to.
+
+## Reading an Error
+
+Every error starts with `:>>` followed by the **error type** in capital letters, so you can spot it at a glance. After that, the format depends on which part of the language found the problem.
+
+### Compile-time errors
+
+Errors found by the **parser** show the line number and the exact piece of code it was looking at when it got confused:
+
+```java
+#pullf io
+make int x = 5
+println(x);
+```
+
+```
+:>>  SYNTAX ERROR -- [line 3 at 'println': Expected ';' after you declare a new variable]
+```
+
+Notice that the error points at line 3, not line 2. The parser only realizes a semicolon is missing when it reaches `println` and finds something other than a `;`. If an error points at a line that looks fine, check the end of the line **above** it.
+
+Errors found by the **type checker** use a slightly different format, with the error type between bars:
+
+```java
+#pullf io
+println(score);
+```
+
+```
+:>>  | UNDEFINED ERROR | at line 2: Undefined variable.]
+```
+
+### Multiple compile errors
+
+The compiler doesn't stop at the first mistake. When it hits an error, it skips ahead to the next statement and keeps checking, so you can see several problems at once and fix them in one go:
+
+```java
+#pullf io
+make int a = "x";
+make bool b = 5;
+println(zzz);
+```
+
+```
+:>>  TYPE MISMATCH ERROR -- [line 2 at ';': A variable expression's type must be the same as it's declared type.]
+:>>  TYPE MISMATCH ERROR -- [line 3 at ';': A variable expression's type must be the same as it's declared type.]
+:>>  | UNDEFINED ERROR | at line 4: Undefined variable.]
+```
+
+Occasionally one mistake confuses the compiler enough to cause a few follow-up errors. If a list of errors doesn't make sense, fix the first one and run it again.
+
+### Runtime errors and stack traces
+
+Runtime errors print the error type and message, followed by a **stack trace**: the chain of function calls that led to the error, with the most recent call at the top.
+
+```java
+#pullf io
+make int[] a = [1, 2, 3];
+make empty show(int i)
+{
+    println(a[i]);
+}
+show(1);
+show(10);
+```
+
+```
+2
+:>>  OUT OF BOUNDS ERROR -- You cannot index outside of an array's defined size
+Stack trace:
+  [line 5] in show()
+  [line 8] in <script>()
+```
+
+Reading the trace from the top down: the error happened on line 5, inside `show()`, which was called from line 8 of the main program. `<script>` is the name for your top-level code, the part of the file that isn't inside any function. Also notice the `2` at the top. The first call, `show(1)`, ran successfully before the second one failed. That's the key difference from compile-time errors.
+
+## Error Types
+
+### Scanner errors
+
+The scanner is the very first stage. It breaks your source code into tokens, and it reports a `PARSER ERROR` when it finds something it can't turn into a token at all.
+
+```java
+make int x = 5 @ 3;
+```
+```
+:>>  PARSER ERROR -- [line 2: An unexpected character was encountered, what on earth are you typing?]
+```
+
+```java
+make string s = "I never end;
+```
+```
+:>>  PARSER ERROR -- [line 3: Must use a double quote to end your string.]
+```
+
+An unterminated string swallows the rest of the file, so this error usually reports the **last** line, not the line where the string started.
+
+### SYNTAX ERROR
+
+The code doesn't follow the language's grammar. This makes it hard for the compiler to know how to translate code to instructions, and so it freaks out. These are by far the most common errors, and the message usually tells you exactly which character is missing.
+
+| Code                       | Message                                                                 |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `make int x = 5`           | `Expected ';' after you declare a new variable`                         |
+| `make int x;`              | `Expected a '=' after you declare a new variable.`                      |
+| `println("hi")`            | `Please end all of your expressions with a ';'!`                        |
+| `if x > 5 { }`             | `Please supplement your if statement with a '(' after 'if'.`            |
+| `make int[] a = [1, 2;`    | `Please finish your array declaration with ']'.`                        |
+| `make int = 5;`            | `You must name your variables and functions, they get sad if you dont.` |
+| `class { }`                | `Please name your classes, they get sad if you don't.`                  |
+| A `{` with no matching `}` | `Each of your '{' must inturn have a matching '}', please.`             |
+
+Generally I hate it when a programming language has a boring error message, so I tried to make mine as fun as possible, and its a bit of a mixed bag of reactions from the people who have used it, but I personally find it pretty funny.
+
+### TYPE ERROR and TYPE MISMATCH ERROR
+
+A value has the wrong type for where it's being used. These come from the type checker, so they're always caught before your program runs.
+
+| Code | Message |
+| ---- | ------- |
+| `make int x = "five";` | `A variable expression's type must be the same as it's declared type.` |
+| `x = "five";` (where `x` is an `int`) | `You cannot try to give a different type to an existing variable!` |
+| `"a" * 3` | `If you want to do math, you have to use numbers (double, float, int), please.` |
+| `!5` | `Operator '!' only works on boolean values man!` |
+| `-true` | `When trying to negate a value, please use a number.` |
+| `"a" < "b"` | `Operators comparing value must compare numbers only.` |
+| `5 == "5"` | `Operators comparing value must compare numbers, booleans, or strings, you cannot mix types (sorry).` |
+| `5 && true` | `An expression involving '&&' must compare two boolean values please.` |
+| `if (count) { }` | `If condition must be a boolean.` |
+| `[1, "two"]` | `All array elements must be the same type.` |
+| `[]` | `Cannot declare an empty array without a type.` |
+| `nums[1.5]` | `An index into an array must be of value type INT, please only use those.` (labelled `INDEX ERROR`) |
+| `add(1, 2.0)` | `An arguement of differing type was found in function call. Please double check function input.` |
+| `return "hi";` in an `int` function | `A return statement should match the type of it's parent function.` |
+
+### UNDEFINED ERROR
+
+You used a name that doesn't exist, or doesn't exist *here* in the current scope that you are in. Meaning you have tried to calla  variable or function before it has been defined, or after it's lifespan in a scope has ended.
+
+| Code | Message |
+| ---- | ------- |
+| `println(score);` before declaring `score` | `Undefined variable.` |
+| `score = 10;` before declaring `score` | `You cannot try to reassign a var that does not exist, no having your cake and eating it.` |
+| `add(1);` when `add` takes two arguments | `Function call parameters amount does not match function definition.` |
+| `doThing();` when `doThing` doesn't exist | `The object you are calling must be an existing function or class instance.` |
+
+That last one has a very common cause: **forgetting a `#pullf` import**. Standard library functions don't exist until you pull them in, so this program:
+
+```java
+println("hello");
+```
+
+fails with:
+
+```
+:>>  | UNDEFINED ERROR | at line 1: The object you are calling must be an existing function or class instance.]
+```
+
+Add `#pullf io` at the top and it works. If you get this error for a standard library function, check your imports first.
+
+### IMPORT ERROR
+
+The library name after `#pullf` doesn't exist:
+
+```java
+#pullf fakeLib
+make int x = 1;
+```
+```
+:>>  IMPORT ERROR -- [line 1 at 'fakeLib': Unknown library name.]
+```
+
+See the [Standard Library](https://olinat.net/docs/stdlib/overview) for the list of real library names. It is being regularly updated, alongside the language, and is one of the most recommended things for a person to try to contribute to, hence why i thought making it it's own outright error message was a decent idea.
+
+### LOGIC ERROR
+
+The code is grammatically fine, but it doesn't make sense in context:
+
+| Code | Message |
+| ---- | ------- |
+| `this` used outside of a class | `You may not use 'this' outside of a class method, there would be no 'this' to call.` |
+| `pullf` used outside of a class | `Cannot use 'pullf' outside of a class` |
+| `pullf` in a class with no parent | `Cannot use 'pullf' in a class with no superClass` |
+| `return` in top-level code | `You cannot have 'return' in top level code.` |
+
+### MEMORY ERROR
+
+You've hit one of the language's built-in size limits. You're unlikely to see these in normal programs, as Oli-Nat is VERY generous in the amount of memory you get. There is a limit of only a byte for things like functions, but there is 2^16 for code blocks and what not.
+
+| Limit | Message |
+| ----- | ------- |
+| More than 255 function parameters | `Your function can only have a max of 255 params.` |
+| More than 256 fields in a class | `You have too many fields in a single class declaration, there is a maximum of 256.` |
+| A huge `if` or loop body | `Too much code to jump over twin.` / `Loop body is too large.` |
+| Too many constants in one chunk | `Too many constants in bytecode chunk` |
+
+## Runtime Errors
+
+These are the errors that only show up while your program is running, because they depend on values that aren't known until then. Oli-Nat tries to minimize these as much as possible because they slow down your program at runtime, but some are necessary.
+
+### OUT OF BOUNDS ERROR
+
+Reading or writing an array index that doesn't exist:
+
+```java
+make int[] nums = [1, 2, 3];
+println(nums[3]);   // the last valid index is 2
+```
+```
+:>>  OUT OF BOUNDS ERROR -- You cannot index outside of an array's defined size
+```
+
+### DIVISON BY ZERO ERROR
+
+Dividing an `int` by zero:
+
+```java
+make int z = 0;
+println(10 / z);
+```
+```
+:>>  DIVISON BY ZERO ERROR -- Cannot logically divide a number by zero.
+Stack trace:
+  [line 3] in <script>()
+```
+
+### STACK OVERFLOW ERROR
+
+Too many function calls nested inside each other, almost always from recursion that never stops:
+
+```java
+make int forever(int n)
+{
+    return forever(n + 1);   // no base case
+}
+forever(0);
+```
+```
+:>>  STACK OVERFLOW ERROR -- Too many function calls deep.
+Stack trace:
+  [line 3] in forever()
+  [line 3] in forever()
+  [line 3] in forever()
+  ...
+```
+
+The stack trace for this one is very long, since it lists every one of the nested calls. If you see the same function repeated over and over, check that your recursive function has a base case that stops it.
+
+### MISSING RETURN ERROR
+
+A function that's supposed to return a value reached its end without returning one:
+
+```java
+make int sign(int n)
+{
+    if (n > 0) { return 1; }
+    if (n < 0) { return -1; }
+}
+sign(0);
+```
+```
+:>>  MISSING RETURN ERROR -- Every single function must have a return statement!!
+```
+
+This only happens if the path without a `return` actually runs, so `sign(5)` works fine and only `sign(0)` fails.
+
+### RUNTIME ERROR
+
+A general category for things that go wrong while running, mostly around classes:
+
+| Situation | Message |
+| --------- | ------- |
+| Comparing two values that can't be compared | `Cannot compare values of different types you goob` |
+| Accessing a field or method that doesn't exist | `Please only use defined method or field calls in your classes, no calling what doesnt exist am I right?` |
+| Passing arguments to a class with no constructor | `This class has no constructor but arguments were passed.` |
+| Calling a method with the wrong number of arguments | `Method was called with a different number of arguements than it had expected.` |
+
+### Standard library errors
+
+Some standard library functions can fail depending on the values you give them:
+
+| Code | Error type | Message |
+| ---- | ---------- | ------- |
+| `strToInt("hello")` | `TYPE ERROR` | `Unable to turn given string into an int value.` |
+| `strToDouble("abc")` | `TYPE ERROR` | `Unable to turn given string into a double value.` |
+| `strToBool("yes")` | `TYPE ERROR` | `Cannot convert string to bool: expected 'true' or 'false'.` |
+| `sqrt(-4)` | `LOGIC ERROR` | `sqrt() requires a non-negative number input, no imagination in my programming language.` |
+| `strSlice` with bad indices | `INDEX ERROR` | `Slice indices are wayyyy out of bounds, cant do it.` |
+| `strReplace` with a missing target | `LOGIC ERROR` | `Unable to find target string to replace in original string.` |
+
+The `strTo...` errors come up a lot with `intake`, since it always returns whatever the user typed, so a user typing `hello` when your program asks for a number will stop it.
+
+## Raising Your Own Errors with `assert`
+
+Since there's no `throw` yet, the way to stop your program on purpose is `assert`, from `#pullf utils`. It takes a condition, and stops the program if the condition is `false`. You can pass an optional message as the second argument:
+
+```java
+#pullf utils
+
+make int age = -3;
+assert(age >= 0, "age can't be negative");
+```
+```
+:>>  ASSERTION ERROR -- age can't be negative
+Stack trace:
+  [line 4] in <script>()
+```
+
+Without a message, it prints `Assertion Failed.` Asserts are a great way to check your own assumptions while writing a program, and they're how Oli-Nat's own test files check their results.
+
+## Quick Reference
+
+| Error type                           | When         | Typical cause                                              |
+| ------------------------------------ | ------------ | ---------------------------------------------------------- |
+| `PARSER ERROR`                       | Compile time | Unknown character, unterminated string                     |
+| `SYNTAX ERROR`                       | Compile time | Missing `;`, `(`, `)`, `{`, `}`, or `]`                    |
+| `GROUPING ERROR`                     | Compile time | Unclosed parentheses                                       |
+| `TYPE ERROR` / `TYPE MISMATCH ERROR` | Compile time | A value of the wrong type                                  |
+| `INDEX ERROR`                        | Compile time | A non-`int` array index                                    |
+| `UNDEFINED ERROR`                    | Compile time | An unknown name, wrong argument count, or missing `#pullf` |
+| `IMPORT ERROR`                       | Compile time | An unknown library after `#pullf`                          |
+| `LOGIC ERROR`                        | Compile time | `this`, `pullf`, or `return` where they don't belong       |
+| `MEMORY ERROR`                       | Compile time | Hitting a built-in size limit                              |
+| `OUT OF BOUNDS ERROR`                | Runtime      | An array index past the end                                |
+| `DIVISON BY ZERO ERROR`              | Runtime      | Integer division by zero                                   |
+| `STACK OVERFLOW ERROR`               | Runtime      | Recursion without a base case                              |
+| `MISSING RETURN ERROR`               | Runtime      | A function ending without returning a value                |
+| `RUNTIME ERROR`                      | Runtime      | Bad field or method access, uncomparable values            |
+| `ASSERTION ERROR`                    | Runtime      | A failed `assert`                                          |
