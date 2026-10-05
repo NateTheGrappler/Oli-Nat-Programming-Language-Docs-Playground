@@ -85,6 +85,7 @@ export const sections: Section[] = [
         {slug: 'io', title: '#pullf io'},                   //Introduction regular console input/output
         {slug: 'math', title:  '#pullf math'},              //Introduce the syntax and use of all of the different math functions added
         {slug: 'chronos', title: '#pullf chronos'},         //introduct the time functions, and explain them a good bit
+        {slug: 'random', title: '#pullf random'},         //introduct the time functions, and explain them a good bit
         {slug: 'fileIO', title: '#pullf fileIO'},           //introduction how to read and write into files, and datestring/timestirng
         {slug: 'types', title: '#pullf types'},             //the different type converstion functions
         {slug: 'strings', title: '#pullf String'},          //how to mess around with things it's unfortunately not built in

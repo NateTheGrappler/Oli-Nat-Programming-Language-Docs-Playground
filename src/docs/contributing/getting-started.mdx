@@ -1,0 +1,191 @@
+import github1 from '../../assets/Images/forkedRepo.png'
+import github2 from '../../assets/Images/githubRepo.png'
+import github3 from '../../assets/Images/githubUrl.png'
+
+
+
+# Getting-Started
+
+## Two Repos:
+
+- [Oli-Nat Bytecode VM](https://github.com/NateTheGrappler/OliNat-Programming-Language) - the github repo of the actual C interpreter. This is the actual language code and implementation, and is where most contributions will go. If you want to change the language, go here.
+
+- [Oli-Nat Documentation & Playgroudn](https://github.com/NateTheGrappler/OliNat-Programming-Language) - is this very sight, built with React, Typescript, Vite, and MDX, with the interpreter compiled to WebAssembly. If you wish to contribute to the documentation or any other aspect of this site, please go here.
+
+## Prerequisites
+
+Oli-Nat does pride itself on being low level and independent from any other libraries. However, in order to compile it, and to contribute to the repo you will need a few things: <br />
+
+**Oli-Nat Bytecode VM**
+- Git, a `C11` compiler (GCC or Clang), and Cmake 3.20 or newer.
+- (WINDOWS ONLY): MSYS2 and UCRT 64 shell.
+
+**Documentation Site & Playground**
+- Git, Node. js, and node package manager (npm)
+  
+## Forking the Repo:
+
+For anyone that might be new to programming, or is new to open source contribution, the following is a tutorial on how to fork and clone a repository, I will be using [OliNat-Programming Language](https://github.com/NateTheGrappler/OliNat-Programming-Language), and if you would like to, you can follow along:
+
+
+<img src={github2} alt="Github Page" className="banner" />
+
+First, go to the github repository that you wish to fork, and then look in the upper right hand corner of the screen for where the `fork` button exists. Click on that button in order to fork the repository.
+
+<img src={github1} alt="Github Fork" className="banner" />
+
+
+The first step will send you over to this screen, (i could not fork my own repo so [another favorite repo](https://github.com/86Box/roms) of mine is used here), click on the green `create fork` button, which will create your own *personal copy* of the repository. <br />
+
+<img src={github3} alt="Github Url" className="banner" />
+
+From this point, you can copy the given link by clicking on the large `< > Code` green button. This will open up the following window, copy the link, and then navigate to your preferred directory on your computer. Opening up a terminal in said directory, and the running `git clone <url you copied>`. <br />
+
+Congratulations, you have forked a github repository, you are now free to clone said repository, edit the code as much as you would like, and then open up a pull request and hopefully have your code merged with the original upstream repository!
+
+## Installation & Working on Codebases
+
+#### Oli-Nat Bytecode VM
+
+You can find the installation guide for the programming language [here](https://olinat.net/docs/installation), simply follow the guide there depending on your operating system. You will generally git clone the repo, build it with cmake, and then run your code in the place where you compiled the Oli_Nat executable with the command:
+
+```bash
+#generally in cmake_build in clone repo
+./Oli_Nat /path/to/source.oli
+```
+
+For reference, the main file gives some different exit codes which can be useful for scripting. `0` means that everything ran okay, exit code `70` is a compile time error, `65` is a runtime error, and then `74` is a "file could not be read error". <br />
+
+Those exit codes are built into the language, so any other exit code you get from your execution are generally probably from a bug in your C code if you have made any new changes. Please see  [error handling](https://olinat.net/docs/guides/errors) for a more descriptive explanation of errors in the Oli-Nat language.
+
+#### Oli-Nat Documentation Site
+
+For building and contributing to the documentation site, you can do so by first [installing npm](https://docs.npmjs.com/downloading-and-installing-node-js-and-npm), and then forking the repo following the same steps depicted above. Run the following commands:
+
+```bash
+#clone the repository
+git clone https://github.com/NateTheGrappler/Oli-Nat-Programming-Language-Docs-Playground.git
+
+#move into the root folder of project
+cd Oli-Nat-Documentation/
+
+#install dependencies, and then build the repository
+npm install
+npm run build
+npm run dev #opens website on localhost, usually on port 5173
+```
+
+The overall project structure is defined in `Layout.tsx` with all child components being loaded in from there, in tandem there is a `playground.tsx` which holds all of the child components for the WASM playground, and also loads in assembly file for the language, rebuilding said WASM file is defined further down below. All actual documentation files are stored in `src/docs/x` with different `.mdx` files holding the information. More detailed project structure can be found [here](https://olinat.net/docs/contributing/project-structure)
+
+
+## Debug builds
+
+So, the Oli-Nat VM has a LOT of different debugging options that are meant to be used by developers to do several things. The are controlled by three flags, which you just uncomment to turn on, which can all be found in `/include/common.h` at the very bottom of the file:
+
+- `#define DEBUG_TRACE_EXECUTION` - this prints out the bytecode instructions and showcases the execution for the VM's bytecode array. It has a few different portions, like the name of the OP_CODE that is being executed, the portion of the bytecode array that is being execute, and a bit of formatting so it looks nicer. This is a **must have** when it comes to developing for the language, all printing logic is found in `/src/debug.c`
+
+-  `#define DEBUG_LOG_GC` - this is also really good for making sure that the GC (garbage collector) is working as intended, and if you are adding in new features to the language that exist on the heap, it is important. All objects are interned in the VM, and so if the GC cannot access the object, then it will be deleted. This prints out what the GC marks, as well as what it deletes. Both the actual object and memory size that gets freed as the language runs. Mostly used in `memory.c`
+
+-  `#define DEBUG_STRESS_GC` - This flag is a bit different from the other two, in the sense that it actually changes the language behavior, and not just the output. It does not print out anything in particular, but changes the GC behavior from instead of calling in random times whenever memory gets too large, it activates the GC on **every single memory allocation**. A memory allocation can happen anytime that the VM creates anything, so it can lead to some really weird bugs where memory is freed when you do not expect it. This can be super hard to debug, so using this lets you make sure that your implementation does not break from a random GC call.
+  
+  There are also debugging objects in the `CMakeLists.txt`, and just like the above C flags, you just uncomment these in order to help you sanitize the memory. This is also really good for random GC bugs because it shows you malformed memory or bad memory access. <br />
+
+It also also important to note that **the language needs to be recompiled each time** that you make a change to one of these commented or uncommented flags in order to take the effect. You uncomment or comment one of these flags, and then rebuild the executable, and only then will they take affect. Please **make sure all of these are commented out when submitting a pull request.**
+
+## Rebuilding the WASM interpreter
+
+The WASM interpreter is what the actual [Code Playground](https://olinat.net/playground) uses under the hood in order to run the language in the web browser. It is just the exact same C code for the VM, but just compiled differently with a few tweaks. <br />
+
+The code for this is on a different [git branch](https://github.com/NateTheGrappler/OliNat-Programming-Language/tree/WASMcompilation) for the main bytecode VM repo. Any changes that are made to the main repository need to be pulled and merged into this repository, it has a few tweaks in the `main.c` and `natives.c` file to make it compatible with the web browser. <br />
+
+#### 1. Compile the Oli-Nat compiler using [Empscripten](https://emscripten.org/docs/getting_started/downloads.html)
+
+```bash
+git clone https://github.com/emscripten-core/emsdk.git
+cd emsdk
+./emsdk install latest
+./emsdk activate latest
+source ./emsdk_env.sh  #run this in every new terminal before using emcc
+```
+
+#### 2. How the browser build differs from the native one
+
+Two things in the C code only exist in the WASM build, inside `#ifdef __EMSCRIPTEN__` blocks: 
+
+- **`runFromSource(const char* source)`** is the entry point the playground calls. It takes the code from the editor as a string, instead of reading a file from disk like `main()` does. 
+
+- **`waitForInput()`** replaces reading from `stdin` in `intake()`. A browser can't block and wait for typing the way a terminal can, so this function pauses the VM, asks the playground for a line of input, and resumes once the user presses Enter. This uses Emscripten's *Asyncify* feature, which is why `-sASYNCIFY` is in the build command.
+
+#### 3. Build From the root of the interpreter repo: 
+
+```bash
+emcc src/*.c -Iinclude -Isrc -O2 \
+-sASYNCIFY \
+-sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME=createOliNat \
+-sEXPORTED_FUNCTIONS=_runFromSource,_malloc,_free \
+-sEXPORTED_RUNTIME_METHODS=ccall,cwrap \
+-sALLOW_MEMORY_GROWTH=1 \
+-o Oli_Nat.mjs
+```
+
+This produces two files: `Oli_Nat.mjs`, the JavaScript loader, and `Oli_Nat.wasm`, the compiled interpreter.
+
+```bash 
+cp Oli_Nat.mjs Oli_Nat.wasm /path/to/Oli-Nat-Programming-Language-Docs-Playground/src/WASM/ 
+``` 
+
+Leave `Oli_Nat.d.mts` alone. It's a hand-written TypeScript description of the module, and it only needs updating if you change what `runFromSource` takes or returns.
+
+## Troubleshooting
+
+### Building the interpreter
+
+**`CMake 3.20 or higher is required`**
+Your CMake is too old. On Ubuntu, the version from `apt` is often behind, so install a newer one with `pip install cmake` or from [cmake.org](https://cmake.org/download/). Check with `cmake --version`.
+
+**`make: command not found` or `mingw32-make: command not found` on Windows**
+You're probably in a regular Command Prompt or PowerShell window. Open the **MSYS2 UCRT64** shell specifically (not "MSYS2 MSYS" or "MINGW64"), and make sure you ran the `pacman` install command from the installation guide inside that shell.
+
+**`undefined reference to 'sin'` (or `sqrt`, `pow`, ...)**
+The math library isn't being linked. `CMakeLists.txt` handles this with `target_link_libraries(Oli_Nat m)`, so this usually means you're compiling by hand with `gcc` instead of through CMake. Either use CMake or add `-lm` to the end of your command.
+
+**My changes aren't doing anything**
+You need to rebuild after every change, including flipping a debug flag in `common.h`: run `make` again from your build folder. If things still look stale, delete the build folder and run `cmake ..` again for a fresh build.
+
+**Windows says a DLL is missing when I run `Oli_Nat.exe`**
+Run it from inside the UCRT64 shell, or rebuild. `CMakeLists.txt` links statically under MinGW to avoid this, so a fresh build should fix it.
+
+### Running programs
+
+**`Could not open file`**, exit code `74`
+The path to your `.oli` file is wrong. Paths are relative to the folder you're running from, which is usually the build folder, so test files are at `../testCases/...`.
+
+**The interpreter crashes with no error message (segmentation fault)**
+That's a bug in the C code, not in your Oli-Nat program. Turn on AddressSanitizer in `CMakeLists.txt` (see [Debug builds](#debug-builds)), rebuild, and run it again. It will point at the exact line. If it happens on the unmodified interpreter, please open an issue with the program that caused it.
+
+**A crash only happens sometimes, or moves around when you add code**
+This is the classic sign of a garbage collector bug: an object is being freed while something still uses it. Turn on `DEBUG_STRESS_GC`. If the crash becomes consistent, an object you allocate isn't reachable by the GC. Push it onto the VM stack before doing any other allocation.
+
+### The docs site
+
+**`npm install` fails**
+Check your Node version with `node --version`. Use a current LTS release, and if it still fails, delete `node_modules` and `package-lock.json` and run `npm install` again.
+
+**A new page shows "Page not found"**
+The page needs both an `.mdx` file in `src/docs/<section-id>/` **and** an entry in `src/config/sections.ts`, and the `slug` must exactly match the file name, including capitalization.
+
+**The page fails to compile with an MDX error**
+MDX is stricter than Markdown. Common causes are an unclosed or invalid tag like `</br >` (use `<br />`), or a stray `{` or `<` in normal text. Wrap those in backticks so they're treated as code.
+
+**The playground loads but code won't run**
+Open the browser console. Most often the `.wasm` file failed to load, or it's out of date with `Oli_Nat.mjs`. Rebuild and copy **both** files together.
+
+### Still stuck?
+
+That's not a failure on your part; it probably means these docs need improving. Reach out:
+
+- **GitHub Issues:** open an issue on the [interpreter repo](https://github.com/NateTheGrappler/OliNat-Programming-Language/issues) or the [docs repo](https://github.com/NateTheGrappler/Oli-Nat-Programming-Language-Docs-Playground/issues). Include your OS, what you ran, and the full error output.
+- Email me at guzinskinatan@gmail.com
+- [Linkedin](https://www.linkedin.com/in/natanguzinski/) (if they allow direct messages): 
+
+I care a lot about this project, and I am incredibly grateful for anyone trying to contribute. I'd much rather answer a question than have someone give up, so please, feel free to contact me with any questions or suggestions.

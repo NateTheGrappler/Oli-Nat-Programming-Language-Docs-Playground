@@ -1,0 +1,184 @@
+# Chronos / Time
+
+`#pullf chronos` is the time manipulation library for the Oli-Nat programming language. The word chronos comes from the Greek and is directly related to that of time, and I thought it sounded cooler than a simple `time` import. <br />
+
+Chronos deals directly with the operating system time, and is used to do several things like get the current time in string format, pause the program, and all other such things. <br />
+
+It should be made of note that because of the low-level idea that time is on the operating system, direct queries to it get a bit funky, especially when you try to maintain the whole, no dependencies thing. <br />
+
+I tried to make as many possible features of this language work for the [playground](https://olinat.net/playground), but WASM and direct clock calls do not always get along, so the bullet proofing for that will hopefully be done in the near future. (If an issue is found, please see the github and let me know. Thank you!)
+
+## clock();
+
+`clock()` is one of my personal favorite functions. It is used to mark the time since your program has started running, and is good for measuring the speed of an algorithm or of the language as a whole.
+
+```java
+#pullf chronos
+#pullf io
+
+make double startTime = clock(); //0.000 runs when program starts
+
+//a large recursion function here
+
+make double endTime = clock(); //something like 34.0032 when the program ends
+```
+
+The function itself takes in no arguments, but it does return a double value that represents the time since the program has started running. As said before, this can be used to time the program you are writing, or even just seed random events, although `time()` is a much better choice for doing so.
+
+### clock(); under the hood
+
+```c
+Value clockNative(int argCount, Value* args, struct Vm* vm) //mark time, returns double
+{
+    return CREATE_DOUBLE_VAL((double)clock() / CLOCKS_PER_SEC);
+}
+```
+
+This is one of the most simple implementations in the entire stdlib, this is because it just uses the `clock()` function that is found in the `include <time.h>` in c. What this does is count the number of *processor clock ticks* that have elapsed <br />
+
+This is then divided by `CLOCKS_PER_SEC` which is just a system constant that represents how many clock ticks occur per second, letting you just divide and get the number of seconds since program started running.
+
+## sleep();
+
+`sleep(int milliseconds)` is a function that pauses the program for the passed in number of milliseconds.  It takes in a single parameter, which can be of any numeric type, and then outright causes the program to stop for that amount of time.
+
+```java
+#pullf chronos
+#pullf io
+
+println(clock()); //0.00000
+
+sleep(1000); //pause program for a single second
+
+println(clock()); // 1.002000 (extra compute time comes from execution overhead)
+```
+
+The function does not return anything, and is generally useful for making a short pause in whatever you need to do that for. Generally it is not too recommended to pause the entire program just because of the implications it might have, but it is a must have for all time libraries, and that includes `chronos`
+
+### sleep(); under the hood
+
+```c
+Value sleepNative(int argCount, Value* args, struct Vm* vm) //pause program for x number of milliseconds
+{
+    double ms = 0;
+    if (IS_INT(args[0]))    { ms = (double)GET_INT_VAL(args[0]); }
+    if (IS_FLOAT(args[0]))  { ms = (double)GET_FLOAT_VAL(args[0]); }
+    if (IS_DOUBLE(args[0])) { ms = GET_DOUBLE_VAL(args[0]); }
+
+#ifdef _WIN32
+    Sleep((unsigned long)ms);
+#else
+    struct timespec ts;
+    ts.tv_sec = (time_t)(ms / 1000);
+    ts.tv_nsec = (long)((ms - (ts.tv_sec * 1000)) * 1000000);
+    nanosleep(&ts, NULL);
+#endif
+
+    return CREATE_EMPTY_VAL();
+}
+```
+
+The sleep native is one of the more complicated portions of the library section because it needs to have that check for which operating system that we are running on. Oli-Nat was written on kubuntu Linux, and so that was the standard it was built for. <br />
+
+Obviously however, a lot of people use windows, and a lot use Mac as well, so there had to be some differences in how each route was handled, each branch just calls the underlying C sleep function, and eventually empty is returned, but it makes the function a bit fun to look at.
+
+## time();
+
+The time native returns the current time, and is useful if you want to actually get the current time from your native device. This function takes in no input, and it returns a double of time in the *unix format* <br />
+
+This means it returns the time in the *number of seconds that have passed since January 1, 1970*
+
+```java
+#pullf chronos
+
+make double x = time(); //1791163603.248000 (on 9:28 pm 10/4/26 EDT)
+```
+
+This does not serve much use for actually getting the time, but is very useful for things like seeding random actions, and is how famous games like tetris actually first made random spawning of pieces. It was very simple to add in, and hence I thought it worth having.
+
+### time(); under the hood
+
+```c
+Value timeNative(int argCount, Value* args, struct Vm* vm)  //Unix timestamp as a double (seconds since January 1, 1970)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) != 0 )
+    {
+        runtimeError(vm, "Error reading system clock value in native time function.", "INTERNAL ERROR");
+        return CREATE_EMPTY_VAL();
+    }
+
+    return CREATE_DOUBLE_VAL((double)ts.tv_sec + ((double)ts.tv_nsec / 1000000000.0));
+}
+```
+
+The implementation is just following what was described above, it uses a standard C function to try and get the current Unix Timestamp (which is not always possible depending on platform, hence the runtime check). <br />
+
+But after doing so, it simply does the conversion to make it into seconds and returns it as a double with millisecond precision.
+
+## dateString();
+
+Native function `dateString()` takes no parameters and outputs a string return object which follows the `MM-DD-YYYY` format. It is useful if you want to get the actual date in a more readable time as compared to the Unix format.
+
+```java
+#pullf chronos
+#pullf io
+
+println(dateString()); //prints out 10-04-2026
+```
+
+This is good for things like displaying the date in your program or something of the sort, a real quality of life function that takes some of the pressure off the user.
+
+### dateString(); under the hood
+
+```c
+Value dateStringNative(int argCount, Value* args, struct Vm* vm) //print out date as string "06-15-2077"
+{
+    time_t rawTime = time(NULL);
+
+    struct tm *localTime = localtime(&rawTime);
+    char dateString[100];
+    strftime(dateString, sizeof(dateString), "%m-%d-%Y", localTime);
+    ObjString* returnString = copyString(dateString, (int)strlen(dateString), vm);
+    return CREATE_OBJECT_VAL((Obj*)returnString);
+}
+```
+
+The function format and use may be simple, but the underlying workings of it still take a bit of thought. Initially we get the rawTime value which returns the current date as 64 bit integer. <br />
+
+This is then converted to a more readable format which we once again just borrow from the c time library. Which after doing so, we can just allocate a char buffer in order to store the upcoming string we are going to write. <br />
+
+We use the `strftime` function in order to populate the buffer with the American format, and then just intern that C string as a Oli-Nat string, returning it as an object so that way the user can do whatever they would like with it.
+
+
+## timeString();
+
+`timeString()` much like `dateString()` is a function that takes no parameters and returns a string object. The only real difference between the two is that instead of returning the current date, it returns the current time in a `HH:MM:SS` format. <br />
+
+Once again, it is really a quality of life function that is good for displaying the actual time for the user, if they wanted to, it makes it so they can just actually get the time instead of the unix time.
+
+```java
+#pullf chronos
+#pullf io
+
+println(timeString()); //:> 21:58:49
+```
+
+Using it in such a manner allows the user to print out a string of the current time, which for me at the moment is around 10 o'clock.
+
+### timeString(); under the hood
+
+```c
+Value timeStringNative(int argCount, Value* args, struct Vm* vm) //print out time of day as string "14:30:00"
+{
+    time_t rawTime = time(NULL);
+
+    struct tm *localTime = localtime(&rawTime);
+    char dateString[100];
+    strftime(dateString, sizeof(dateString), "%H:%M:%S", localTime);
+    ObjString* returnString = copyString(dateString, (int)strlen(dateString), vm);
+    return CREATE_OBJECT_VAL((Obj*)returnString);
+}
+```
+
+Not much changes here from the `dateString()` function, the only real difference is the actual string formatting that is passed in using `strftime()`, which is in reality the only difference, and it means you can add in different formats to your choosing very easily. Open a pull request and contribute [here](https://olinat.net/docs/contributing/getting-started)

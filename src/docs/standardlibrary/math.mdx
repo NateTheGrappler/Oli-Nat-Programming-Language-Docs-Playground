@@ -1,0 +1,126 @@
+# Math
+
+The math standard library basically just encompasses the bulk of regularly used math functions that you might find on a regular texas instruments calculator in any american highschool. <br />
+
+It serves it's function in the idea that it gives the user a wide range of functions, all of them are pretty simple so there will only really be just one example of a function / the under the hood for the function, and then a table or list of functions for reference.
+
+## sin();
+
+`sin()` was one of the first mathematical functions implemented in the library, and so it will be used as the example for the calling of this entire library
+
+```java
+#pullf math //import the math library
+
+make double zero = sin(2*3.14159); //a native function call returning doubles
+```
+
+A few things to make note of, the functions are able to take only really one parameter, however that parameter may be of any numerical type such as `int, float, or double`, types like `booleans` are not accepting because even though yes they are binary values, they are not treated as such by Oli-Nat. <br />
+
+Secondly, nearly **all of the functions in the math native library return doubles** <br />
+
+This may sound strange at first, but it is because under the hood Oli-Nat uses the C math functions, which themselves return doubles. Therefore it made the most sense to have all math functions do so as well, and leave it up to the user if they want to change the type. See [#pullf types](https://olinat.net/docs/stdlib/types) for more information.
+
+```java
+#pullf math //import the math library
+#pullf types //import type conversions
+
+make int one = doubleToInt(cos(2*3.14159)); //a native function call returning doubles, coverted to integers
+```
+
+### Under the hood for basic math functions
+
+The implementation for these math functions is very basic, given there is only one argument, the only issue is making sure that said argument is numeric, which is done within the type checker. <br />
+
+So since we know that the parameter is defintly one of three different types, we just check for all types, and depending on what we get, we make a double after calling the `C` version of that function. So, using our old pal sin();
+
+```c
+Value sinNative(int argCount, Value* args, struct Vm* vm)
+{
+    if (IS_INT(args[0]))    { return  CREATE_DOUBLE_VAL(sin(GET_INT_VAL(args[0]))); }
+    if (IS_FLOAT(args[0]))  { return CREATE_DOUBLE_VAL(sin(GET_FLOAT_VAL(args[0]))); }
+    if (IS_DOUBLE(args[0])) { return CREATE_DOUBLE_VAL(sin(GET_DOUBLE_VAL(args[0]))); }
+    return CREATE_EMPTY_VAL();
+
+}
+```
+
+This patter is repeated for the bulk of functions, which are all listed in the table below.
+
+## Exceptions
+
+There are a few exceptions that are worth documenting, simply for the sake of accuracy as the creator of this language.
+
+### pow();
+
+This one is a bit different from the others because it takes in two parameters instead of one, a <u>base & power</u>. Both of which can be differing or matching numeric types <br />
+
+The usage of the function is still the same as the others, and it also returns a double by default:
+
+```java
+#pullf math
+
+make double x = pow(2, 3);   //2 as the base, 3 as the power, answer is 8.0
+make double x = pow(2, 3.0); //the same is true even if the types are different
+```
+
+### sqrt();
+
+This one differs in the fact that the parameter, logically, cannot be negative. This means that there is a safe guarded runtime check:
+
+```c
+Value sqrtNative(int argCount, Value* args, struct Vm* vm)
+{
+    double x;
+    if (IS_INT(args[0]))        x = (double)GET_INT_VAL(args[0]);
+    else if (IS_FLOAT(args[0])) x = (double)GET_FLOAT_VAL(args[0]);
+    else                        x = GET_DOUBLE_VAL(args[0]);
+
+    if (x < 0)
+    {
+        runtimeError(vm, "sqrt() requires a non-negative number input, no imagination in my programming language.\n", "LOGIC ERROR");
+        return CREATE_EMPTY_VAL();
+    }
+    return CREATE_DOUBLE_VAL(sqrt(x));
+}
+```
+
+that makes sure that the argument that the user inputted was in fact more than one. This is unfortunate  because it means that the code is a bit less efficient given that it cannot explicitly trust the user with what they input, pass that it is a numeric value. <br />
+
+Making an entirely extra pass to make sure that the value is not negative is not worth the effort of the minute amount of speed it gives to the runtime. <br />
+
+The function call remains the same, and the logic described above applies of course: 
+```java
+#pullf math
+
+make double noError = sqrt(16); //returns 4
+make double Error = sqrt(-16); //RUNTIME ERROR
+```
+
+
+## Function Reference
+
+All functions come from `#pullf math`. Any parameter marked *number* accepts an `int`, `float`, or `double`. Trig functions work in **radians**, not degrees.
+
+| Function    | Description                                 | Example       | Result     |
+| ----------- | ------------------------------------------- | ------------- | ---------- |
+| `sin(x)`    | Sine of `x` (radians)                       | `sin(0)`      | `0.0`      |
+| `cos(x)`    | Cosine of `x` (radians)                     | `cos(0)`      | `1.0`      |
+| `tan(x)`    | Tangent of `x` (radians)                    | `tan(0)`      | `0.0`      |
+| `abs(x)`    | Absolute value: distance from zero          | `abs(-5)`     | `5.0`      |
+| `sqrt(x)`   | Square root. `x` must not be negative       | `sqrt(16)`    | `4.0`      |
+| `pow(b, e)` | `b` raised to the power `e`                 | `pow(2, 3)`   | `8.0`      |
+| `expo(x)`   | *e* raised to the power `x`                 | `expo(1)`     | `2.718282` |
+| `ln(x)`     | Natural logarithm (base *e*)                | `ln(expo(2))` | `2.0`      |
+| `log10(x)`  | Base-10 logarithm                           | `log10(100)`  | `2.0`      |
+| `log2(x)`   | Base-2 logarithm                            | `log2(8)`     | `3.0`      |
+| `floor(x)`  | Rounds **down** to the nearest whole number | `floor(3.7)`  | `3.0`      |
+| `ceil(x)`   | Rounds **up** to the nearest whole number   | `ceil(3.2)`   | `4.0`      |
+
+
+*A few notes for the math savvy:*
+
+- `floor` and `ceil` still return a `double`, so `floor(3.7)` is `3.0`, not `3`. Wrap the result in `doubleToInt()` from `#pullf types` if you need an `int`.
+
+- `sqrt` is the only function that checks its input. The logarithms (`ln`, `log10`, `log2`) follow C's rules instead of erroring: `0` gives negative infinity, and a negative number gives `nan` (not a number).
+
+- To convert degrees to radians for the trig functions, multiply by `3.14159 / 180.0`, I did not feel like building in it's own function for such a trivial thing.
