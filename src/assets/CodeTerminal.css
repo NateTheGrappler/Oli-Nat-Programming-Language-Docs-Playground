@@ -1,6 +1,6 @@
 .codeTerminal {
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: flex-end;
     flex: 0 1 55%;
     min-height: 0;

@@ -27,6 +27,8 @@
 .playground-mainContent--stacked .codeTerminal {
     justify-content: center;
     width: 100%;
+    flex: 0 0 auto;
+    container-type: normal;
     padding: 12px 8px;
 }
 
@@ -49,6 +51,7 @@
     flex-direction: column-reverse;
     flex: 0 0 auto;
     min-height: 0;
+    min-width: 0;
 }
 
 .playground-mainContent--stacked .playground-inputContent > :first-child {
