@@ -2,7 +2,7 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
-    flex: 0 0 auto;
+    flex: 0 1 55%;
     min-height: 0;
     box-sizing: border-box;
     overflow: hidden; 
@@ -10,15 +10,14 @@
 
 .codeTerminal-monitor {
     position: relative;
-    height: 100%;
-    width: auto;
+    width: min(100cqw, 100cqh * 4 / 3);
+    aspect-ratio: 4 / 3;
 }
 
 .codeTerminal-Computer {
     display: block;
     height: 100%;
-    width: auto;
-    object-fit: contain;
+    width: 100%;
     image-rendering: pixelated;
 }
 
