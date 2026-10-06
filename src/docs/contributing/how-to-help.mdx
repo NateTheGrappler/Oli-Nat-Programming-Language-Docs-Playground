@@ -1,0 +1,85 @@
+# Ways to Contribute
+## No technical Knowledge needed
+
+There are plenty of tasks that you can contribute to if you want to without having to write down any real technical code. Even a light understanding of the command line and the C language goes a really long way.
+
+##### **Things to do:**
+- Report bugs with any programs that you run in either the the WASM playground or the actual compiler through the executable. Something that does not work as expected, something you would like to see, anything like that is welcome
+  
+- Fix any typos or unclear explanations in the docs. God knows that I do not have the best spelling in the world, there is a reason I became a Computer Science major instead of an English major. If you see bad spelling or something that is unclear, it is a welcome and appreciated fix. (Fun fact, while writting this someone pointed out a spelling mistake in [getting-started](https://olinat.net/docs/contributing/getting-started)). 
+  
+  
+- **Write Test Cases!** - the most fun to do with the language is *try it*, and so if you want to write a cool program in the language and you want to share it, feel free to add it to one of the demos in the [playground test cases directory](https://github.com/NateTheGrappler/Oli-Nat-Programming-Language-Docs-Playground/tree/main/src/testCases)
+
+# Good First Code Contributions
+
+If you are pretty comfortable with C and low-level programing, then you are absolutely welcome to leave your nice mark on the language. Smaller projects that still show good understanding are always welcome, and really do let you shine and play ground with a malleable bytecode VM
+
+##### **Things to Do**
+
+- New standard library functions are super good to get started in. They are very easy to add, and with just a quick brush up on how the actual project is structured, and/or going more in depth with the system-design portion of the docs, you can do so in only a few hours. Many contributors have already done so, whole modules like `random` were contributions, thank you ([Mohammad](https://github.com/MXD-K1))
+  
+- Clear error messages, things like actually capturing the entire line and adding in the given space to give a visual portion of the error for the user, similar to how python does it. You are welcome to do something like this and while sounding daunting, is more simple than you might thing. I tried to keep the errors funny and chill, but you are welcome to add your own spins.
+  
+- Small language gaps and features that do not take a long time to implement, for example something like a small like a `%` operator, or a `break / continue` statement for loops. These are things that are planned to be added in anyways, so why not have it be you!
+  
+## Bigger, more Ambitious Additions
+
+If you feel really comfortable with low level programming, and maybe have worked on and hacked other programming languages or virtual machines, then you are welcome to make a major contribution to the language. Helping to shape Oli-Nat into a tool that you might actually want to use for your specific needs.
+
+##### Things to Do
+- Add in things like multi-file linking, with the thought that Oli-Nat will be able to compile natively from multiple different `.oli` files, all into one program for the user to be able to run and execute. This is a very large undertaking, however if you feel up for the challenge, you are welcome to it.
+  
+- Add in a Native Hash-map import module which imports in a hashmap type and a bunch of different hashmap functions (you can call them dictionaries if you want). The Oli-Nat language already uses Hash-Maps for things like interning strings and class object field/method access, but if you want to extend that ability to the user, you are welcome to do so.
+  
+- A graphics library, create a branch that natively supports 2 D graphics using an outside C library import. This can make Oli-Nat specialized for game dev or just simulations if you would like! A very large task with a lot of interesting questions, but if you feel up to it go ahead.
+  
+## Okay, I made a Change, now what?
+
+If you have made a change that you wish to possibly merge into the main branch of the language, then you are welcome to open up a pull request, and I will personally review it as soon as possible. I generally tend to get to most pull requests in a few days, but you are welcome to contact me:
+
+- Email me at guzinskinatan@gmail.com
+- [Linkedin](https://www.linkedin.com/in/natanguzinski/) (if they allow direct messages): 
+
+With any issues or questions that you might have, I am always very happy to hear from anyone.  <br />
+
+Make sure to have properly [forked the repository](https://olinat.net/docs/contributing/getting-started) and gone through the proper [build process](https://olinat.net/docs/installation) so you can be confident that your code is correct and does not outright break anything in the language. Also always check `CONTRIBUTING.md` before submitting any pull requests <br />
+
+There will eventually be a proper CI/CD workflow with a bunch of actual test cases to run through that will compare output, but I wanted to get this up and running first before tackling that, for the time being you can compare your output with the demo programs that live under `testcases/` and see that the output you get is what is expected. 
+
+## I have a bug, what do I do?
+
+Please [open an issue on GitHub](https://github.com/NateTheGrappler/OliNat-Programming-Language/issues/new)! Bugs in the language itself go in the [interpreter repository](https://github.com/NateTheGrappler/OliNat-Programming-Language/issues), and problems with this website or the playground go in the [docs repository](https://github.com/NateTheGrappler/Oli-Nat-Programming-Language-Docs-Playground/issues). Don't worry if you're not sure which one it belongs in; I'll move it if needed. <br />
+
+You don't need a perfect, minimal example. Whatever you have is a great starting point, and we can narrow it down together. It helps a lot if your issue includes:
+
+```md
+**What happened?**
+A short description of the bug.
+
+**Code that causes it**
+The Oli-Nat program (or the smallest part of it you can share) that triggers the bug.
+
+**What you expected to happen**
+
+**What actually happened**
+The exact output or error message, copied as text if possible.
+
+**Where you ran it**
+The playground (which browser?) or the native interpreter (which OS?).
+```
+
+## Thank You, Contributors
+
+Oli-Nat wouldn't be where it is without the people who've given their time to it. A huge thank you to:
+
+- [**Mohammed Al-Shugaa**](https://github.com/MXD-K1): the `seed`, `random`, and `randint` functions, and `strReverse`
+- [**Enmanuel "Manny" Rodriguez**](https://github.com/Mxvnnyy): the language's first random number generator
+- [**anubhavaanand**](https://github.com/anubhavaanand): example programs for closures, inheritance, and the standard library, plus an architecture diagram for the README
+- [**Voyagerroc-Lab**](https://github.com/Voyagerroc-Lab): a fix for boolean array declaration types
+
+See the full, always up-to-date list on [GitHub](https://github.com/NateTheGrappler/OliNat-Programming-Language/graphs/contributors). Your name could be next!
+
+## License
+
+Oli-Nat is open source under the [MIT License](https://github.com/NateTheGrappler/OliNat-Programming-Language/blob/main/LICENSE). By contributing, you agree that your contributions will be shared under the same license.

@@ -42,6 +42,7 @@ export const sections: Section[] = [
     pages: [
         { slug: 'getting-started', title: 'Local setup' },
         { slug: 'project-structure', title: 'Project structure' },
+        { slug: 'docs', title: 'Contribute To Docs' },
         { slug: 'testing', title: 'Running tests' },
         { slug: 'how-to-help', title: 'Ways to contribute' },
     ],
