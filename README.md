@@ -78,9 +78,8 @@ The site will be running at `http://localhost:5173`.
 
 ## Project Showcase
 
-<video width="auto" height="auto" controls autoplay loop>
-  <source src="src/assets/Images/Oli-Nat-DemoVID.mp4" type="video/mp4">
-</video>
+https://github.com/user-attachments/assets/7efd7589-cc98-48d9-8e0e-75ab0c108bd1
+
 
 ## Common Tasks
 
