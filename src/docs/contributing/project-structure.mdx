@@ -1,0 +1,175 @@
+# Project Structure
+
+The Oli-Nat interpreter is about 6,800 lines of C spread across 30 files. That's small for a language, but still a lot to read before making your first change. This page is a map, it shows what each file does, how the files fit together, and exactly where to go for the most common kinds of changes.
+
+Everything here is about the [interpreter repository](https://github.com/NateTheGrappler/OliNat-Programming-Language). For deeper explanations of how each stage works, see the [System Design](https://olinat.net/docs/system-design/introductionToDesign) section.
+
+## The Pipeline
+
+```mermaid
+flowchart LR
+    Source[Source Code] --> Scanner[Scanner]
+    Scanner --> Parser[Pratt Parser]
+    Parser --> AST[AST]
+    AST --> TypeChecker[Type Checker]
+    TypeChecker --> Compiler[Bytecode Compiler]
+    Compiler --> VM[VM]
+    
+    VM --> |owns| GC[Garbage Collector]
+    GC --> |marks/sweeps| Heap[Heap Objects]
+```
+
+## File by File
+
+The follow is a breakdown of the project structure, the line counts are just for fun and gotten with cloc, but I thought that giving a quick taste of each file and what it does/how it fits into the program as a whole was a good idea. A VM is a monstrous machine made up of smaller parts, which when understood in tandem makes the whole thing much more believable.
+
+### The pipeline
+
+| File | Lines | What it does |
+| ---- | ----- | ------------ |
+| `src/scanner.c` | 257 | Turns source text into tokens, one at a time, and recognizes keywords |
+| `src/ASTcompiler.c` | 1,403 | The Pratt parser, both compiler passes, statement compiling (`if`, loops, functions, classes), scopes, and `#pullf` imports |
+| `src/Expr.c` / `src/Expr.h` | 296 / 160 | The AST node types and the functions that create and free them |
+| `src/typeChecker.c` | 946 | Checks the type of every expression, and registers the type signatures of every standard library function |
+| `src/Bytecompiler.c` | 301 | Walks each type-checked tree and emits bytecode |
+| `src/vm.c` | 1,109 | The virtual machine: the main execution loop, function calls, closures, classes, and native function registration |
+
+### Runtime support
+
+| File | Lines | What it does |
+| ---- | ----- | ------------ |
+| `src/natives.c` | 539 | The C implementations of every standard library function |
+| `src/memory.c` | 278 | Memory allocation and the mark-and-sweep garbage collector |
+| `src/object.c` | 154 | Creating heap objects: strings, functions, closures, arrays, classes, instances |
+| `src/Hashmap.c` | 117 | The hash table used for string interning, globals, and class methods |
+| `src/chunk.c` | 37 | The growable bytecode buffer and its constants |
+| `src/Value.c` | 23 | Helpers for the `Value` type |
+| `src/common.c` | 25 | Shared helpers, like converting between array types and their element types |
+
+### Entry point and tools
+
+| File | Lines | What it does |
+| ---- | ----- | ------------ |
+| `src/main.c` | 59 | Reads a `.oli` file, runs it, and sets the exit code |
+| `src/debug.c` | 459 | The bytecode disassembler and value printer, used by `print` and the debug trace flags |
+
+### Headers
+
+| File | What it declares |
+| ---- | ---------------- |
+| `include/chunk.h` | The opcode enum (`OP_ADD`, `OP_CALL`, ...) and the `Chunk` struct |
+| `include/Value.h` | The `Value` type and its macros (`CREATE_INT_VAL`, `IS_INT`, `GET_INT_VAL`, ...) |
+| `include/object.h` | `Obj` and every object subtype |
+| `include/vm.h` | The `Vm` struct, call frames, and the `push` / `pop` stack functions |
+| `include/natives.h` | Declarations for every native function |
+| `include/memory.h` | Allocation macros like `ALLOCATE` and `FREE` |
+| `include/Hashmap.h`, `include/hashmap_types.h` | The hashmap and its buckets |
+| `include/common.h` | Shared includes and the debug flags (`DEBUG_TRACE_EXECUTION`, `DEBUG_LOG_GC`, `DEBUG_STRESS_GC`) |
+| `src/scanner.h` | The token enum (`T_PLUS`, `T_MAKE`, ...) and the scanner |
+| `src/ASTcompiler.h`, `src/typeChecker.h`, `src/Bytecompiler.h`, `src/debug.h` | Interfaces for those stages |
+
+## The Two-Pass Compile
+
+Oli-Nat compiles every program **twice**, and although at the time of writing I believe it works out well, it is pretty shaky in terms of implementation, so please feel free to look over this as one of your contributions if you would like to.
+
+The **first pass** (`declareFunction()` in `ASTcompiler.c`) skims the whole file using a second parser. It doesn't compile anything; it only records the name, parameters, and return type of every top-level function and class in the type checker's symbol table, skipping over their bodies. It also registers the type signatures of any `#pullf` libraries.
+
+The **second pass** (`declaration()`) is the real compile. It parses each declaration into a tree, type checks it, and emits bytecode.
+
+The first pass is what lets a function be called from inside another function that's written above it: by the time the second pass type checks that call, the signature is already known. In practice this means that **anything that changes what a function or class declaration looks like has to be updated in both passes.** If you add a new kind of parameter, a new type, or a new library name, check `declareFunction()` as well as the normal compile path.
+
+## Where Do I Go To...
+
+### ...add a standard library function
+
+Use the existing functions in the same library as a template; most of them are only a few lines.
+
+1. **Write the function** in `src/natives.c`. Every native has the same signature: `Value myFunctionNative(int argCount, Value* args, struct Vm* vm)`. Read your arguments from `args`, and return a `Value`.
+2. **Declare it** in `include/natives.h`.
+3. **Register it with the VM** by calling `defineNative(vm, "myFunction", myFunctionNative);` in the right `register...Natives()` function in `src/vm.c`, for example `registerMathNatives()`.
+4. **Register its type signature** in the matching `register...Symbols()` function in `src/typeChecker.c`. This tells the type checker how many parameters it takes, their types, and its return type. Use `VALUE_ANY_NUM` for "any number" parameters, and `VALUE_ANY` for "anything".
+5. **If you're creating a new library,** add its name in `ASTcompiler.c` in **both** places library names are checked: `nativeFunction()` for the second pass, and the `#pullf` handling in `declareFunction()` for the first pass.
+6. **Add a test** in `testCases/Stdlib/`, using `assert` to check the results, and **document it** on the library's page in the [Standard Library docs](https://olinat.net/docs/stdlib/overview).
+
+If your function can fail (for example, bad input), call `runtimeError(vm, "message", "ERROR TYPE")` and return. The VM checks for the error as soon as your native returns.
+
+### ...add a binary operator (like `%`)
+
+Operators touch every stage of the pipeline, so work through it in order:
+
+1. **Scanner:** add a token to the enum in `src/scanner.h`, and recognize the character in `scanToken()` in `src/scanner.c`.
+2. **Parser:** add the token to the parse rules table at the top of `src/ASTcompiler.c`, with `binary` as its infix function and the right precedence (`PREC_FACTOR` for `%`). Then add a `case` in `binary()` that creates the node, like `createBinary(left, right, "%", ...)`.
+3. **Type checker:** handle the new operator string in `checkBinary()` in `src/typeChecker.c`, deciding which types it accepts and what type it returns.
+4. **Opcode:** add a new opcode to the enum in `include/chunk.h`.
+5. **Bytecode compiler:** map the operator string to your opcode in `emitBinaryOperator()` in `src/Bytecompiler.c`.
+6. **VM:** add a `case` for the opcode in `run()` in `src/vm.c` that pops the operands, computes the result, and pushes it.
+7. **Disassembler:** add the opcode to `disassembleInstruction()` in `src/debug.c`, so it shows up correctly in the debug trace.
+
+For a brand new opcode that isn't an operator (a new kind of statement, say), steps 4, 6, and 7 are always needed, plus whatever parsing and compiling produces it.
+
+### ...add a keyword
+
+1. Add a token to the enum in `src/scanner.h`.
+2. Teach `identifierType()` in `src/scanner.c` to recognize it. Keywords are matched with a switch on the first letter, then `checkKeyword()` for the rest of the word, so find the right letter's `case`.
+3. Add the token to the parse rules table in `src/ASTcompiler.c`. For a statement keyword like `break`, give it `NULL` parse functions and handle it in `statement()` instead.
+
+Adding a keyword means that word can no longer be used as a variable name, so mention it on the [Syntax](https://olinat.net/docs/guides/syntax) page's keyword list.
+
+### ...change an error message
+
+Errors come from three places, depending on when they happen:
+
+| Kind | Where | Function |
+| ---- | ----- | -------- |
+| Syntax errors | `src/ASTcompiler.c` | `error()`, `errorAtCurrent()`, and `consume()` |
+| Type errors | `src/typeChecker.c` | `typeError()` (and some calls to `error()`) |
+| Runtime errors | `src/vm.c`, `src/natives.c` | `runtimeError()` |
+| Scanner errors | `src/scanner.c` | `errorToken()` |
+
+Each takes the message and an error type label like `"TYPE MISMATCH ERROR"`. Searching the repository for the message text is the fastest way to find a specific one. See [Error Handling](https://olinat.net/docs/guides/errors) for what each kind looks like to the user, and update that page if you change a message it quotes.
+
+## Key Data Structures
+
+A few types appear everywhere. Knowing them makes the rest of the code much easier to follow:
+
+- **`Value`** (`include/Value.h`): every value in an Oli-Nat program. It's a tagged union, a `type` field plus the data itself: an `int`, `float`, `double`, `bool`, or a pointer to a heap object. Always use the macros (`CREATE_INT_VAL`, `IS_INT`, `GET_INT_VAL`, and so on) rather than touching the fields directly.
+- **`Obj`** (`include/object.h`): the header shared by everything that lives on the heap. Each subtype (`ObjString`, `ObjFunction`, `ObjClosure`, `ObjUpValue`, `ObjStaticArray`, `ObjClass`, `ObjInstance`, `ObjNative`) starts with an `Obj`, so any of them can be treated as an `Obj*`. Every object is also linked into a list owned by the VM, which is how the garbage collector finds them.
+- **`Chunk`** (`include/chunk.h`): a function's compiled bytecode: an array of opcode bytes, a parallel array of line numbers for error messages, and a pool of constants.
+- **`Hashmap`** (`include/hashmap_types.h`): an open-addressing hash table keyed by interned `ObjString*`. It's used for the string intern table, global variables, and each class's methods.
+- **`Vm`** (`include/vm.h`): all runtime state: the value stack, the call frames, globals, the interned strings, and the garbage collector's bookkeeping.
+
+The [Key Data Structures](https://olinat.net/docs/system-design/dataStructures) page goes into each of these in depth.
+
+## Conventions Worth Knowing
+
+### Protect new objects from the garbage collector
+
+Any allocation can trigger a garbage collection, and the collector frees every object it can't reach from the VM's stack, globals, or call frames. An object you just created, but haven't stored anywhere yet, is unreachable, so the next allocation could free it out from under you.
+
+The fix used throughout the codebase is to **push the object onto the VM stack before allocating anything else, and pop it once it's safely stored:**
+
+```c
+push(vm, CREATE_OBJECT_VAL((Obj*)class));   // anchor against gc
+ObjInstance* instance = newInstance(class, vm);
+pop(vm);
+```
+
+If you add code that creates more than one object at a time, use this pattern. Then test with `DEBUG_STRESS_GC` turned on in `include/common.h`, which runs a collection on every single allocation and makes these bugs show up immediately instead of randomly.
+
+### Headers: `include/` versus `src/`
+
+Headers in `include/` describe the shared runtime: values, objects, chunks, memory, the VM, and natives. Nearly every file needs them. Headers in `src/` belong to a specific stage of the compiler (the scanner, parser, type checker, bytecode compiler, and debug tools) and sit next to their `.c` file. Both folders are on the include path, so `#include "vm.h"` works from anywhere. When adding a new header, put it in `include/` if the runtime needs it, and next to its `.c` file if only the compiler does.
+
+### Naming
+
+| Kind | Style | Examples |
+| ---- | ----- | -------- |
+| Functions and variables | camelCase | `scanToken`, `checkExpression`, `frameCount` |
+| Types | PascalCase, with `Obj` for heap objects | `Chunk`, `TypeChecker`, `ObjClosure` |
+| Opcodes | `OP_` prefix | `OP_ADD`, `OP_GET_LOCAL` |
+| Tokens | `T_` prefix | `T_PLUS`, `T_MAKE` |
+| Value types | `VALUE_` prefix | `VALUE_INT`, `VALUE_STRING_ARRAY` |
+| Native functions | `Native` suffix | `sqrtNative`, `strToIntNative` |
+| Value macros | `CREATE_`, `IS_`, `GET_` prefixes | `CREATE_INT_VAL`, `IS_STRING`, `GET_DOUBLE_VAL` |
+
+There's no strict style guide beyond this. Match the style of the code around your change, and don't worry about getting formatting perfect; it can always be tidied up during review.

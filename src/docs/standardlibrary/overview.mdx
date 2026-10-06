@@ -1,0 +1,121 @@
+# Standard Library Overview
+
+Oli-Nat's core language gives you variables, arrays, control flow, functions, and classes, but on its own it can't print anything, read input, or even take a square root. All of that lives in the **standard library**. A set of functions written in C, built directly into the interpreter, that your Oli-Nat programs can call just like functions you wrote yourself! <br />
+
+The standard library is split into small, focused libraries, and **nothing is loaded until you ask for it.** You pull in the libraries you need with the `#pullf` directive at the top of your file. This keeps things lightweight and means that adding to the standard library is only of benefit to the language.
+
+## Using `#pullf`
+
+To use a library, write `#pullf` followed by the library's name:
+
+```java
+#pullf io
+#pullf math
+
+println(sqrt(16.0));   //4.000000
+```
+
+There are a few rules to know:
+
+- **One library per line.** Each `#pullf` takes a single library name, so pulling in three libraries takes three lines.
+- **No semicolon.** `#pullf` is a directive, not a statement, so it doesn't end with a `;`.
+- **Names are case-sensitive.** `#pullf io` works, but `#pullf IO` doesn't.
+- **Put them at the top of your file.** The compiler is fairly forgiving about where a `#pullf` goes, but keeping them all at the top makes it obvious at a glance which libraries a program depends on.
+- **Pulling a library twice is harmless.** The second `#pullf` simply does nothing new.
+
+If you just want everything, `#pullf stdlib` loads every library at once:
+
+```java
+#pullf stdlib
+
+println(strToUpper("hello"));   //HELLO
+println(randint(1, 6));         //a random number from 1 to 6
+```
+
+That's handy for quick experiments and playground programs. For anything bigger, pulling in only what you use keeps it clear what your program actually needs.
+
+### What happens if you forget?
+
+If you call a library function without pulling in its library, the function simply doesn't exist yet as far as the compiler is concerned, and you'll get an error before your program runs:
+
+```java
+println("Hello World");
+```
+
+```
+:>>  | UNDEFINED ERROR | at line 1: The object you are calling must be an existing function or class instance.]
+```
+
+So if a perfectly normal looking call like `println` or `sqrt` comes back as undefined, a missing `#pullf` is almost always the reason. Misspelling a library name is caught too:
+
+```java
+#pullf maths
+```
+
+```
+:>>  IMPORT ERROR -- [line 1 at 'maths': Unknown library name.]
+```
+
+See [Error Handling](https://olinat.net/docs/guides/errors) for more on reading error messages.
+
+## The Libraries
+
+| Library                                           | Pull with                      | What it's for                                                            | Functions                                                                                      |
+| ------------------------------------------------- | ------------------------------ | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| [IO](https://olinat.net/docs/stdlib/io)           | `#pullf io`                    | Printing to the terminal and reading user input                          | `print`, `println`, `intake`                                                                   |
+| [Math](https://olinat.net/docs/stdlib/math)       | `#pullf math`                  | Trigonometry, logarithms, roots, powers, and rounding                    | `sin`, `cos`, `tan`, `abs`, `ln`, `log10`, `log2`, `sqrt`, `floor`, `ceil`, `expo`, `pow`      |
+| [Chronos](https://olinat.net/docs/stdlib/chronos) | `#pullf chronos`               | Timing code, pausing, and getting the current date and time              | `clock`, `sleep`, `time`, `dateString`, `timeString`                                           |
+| [Random](https://olinat.net/docs/stdlib/random)   | `#pullf random`                | Random numbers, with an optional seed for repeatable results             | `random`, `randint`, `seed`                                                                    |
+| [File IO](https://olinat.net/docs/stdlib/fileIO)  | `#pullf fileIO`                | Reading, writing, and deleting files                                     | `readFile`, `writeFile`, `appendFile`, `fileExists`, `deleteFile`                              |
+| [Types](https://olinat.net/docs/stdlib/types)     | `#pullf types`                 | Converting values between `int`, `float`, `double`, `string`, and `bool` | `intToStr`, `strToInt`, `doubleToInt`, and 11 more                                             |
+| [Strings](https://olinat.net/docs/stdlib/strings) | `#pullf String` (or `Strings`) | Working with text: searching, slicing, replacing, and changing case      | `strLength`, `strContains`, `strSlice`, `strToUpper`, `strToLower`, `strReplace`, `strReverse` |
+| [Utils](https://olinat.net/docs/stdlib/utils)     | `#pullf utils`                 | Small general helpers, including the `assert` used by the test programs  | `length`, `assert`                                                                             |
+
+Each library has its own page with every function's parameters, return type, and examples.
+
+### Coming eventually
+
+The names `Hashmap` and `ArrayList` are already reserved for future libraries. You can `#pullf` them today without an error, but they're empty for now, so they don't give you any functions yet. If you'd like to be the one who fills them in, see [Ways to Contribute](https://olinat.net/docs/contributing/how-to-help).
+
+## Library Functions Are Type Checked
+
+Even though standard library functions are written in C, the type checker knows the exact signature of every one of them *(a pain staking processes to add, I assure you)*, so they get the same compile-time checking as functions you write yourself. Passing the wrong type, or the wrong number of arguments, is caught before your program ever runs:
+
+```java
+#pullf io
+#pullf math
+
+println(sqrt("sixteen"));
+```
+
+```
+:>>  | TYPE ERROR | at line 4: Please only input numeric arguements (int, float, double)]
+```
+
+The same goes for return types. `intToStr` returns a `string`, so storing its result in an `int` variable is a type error, just like it would be with your own function.
+
+A few functions are deliberately flexible. `print` and `println` take a value of any type, and most math functions accept any number type (`int`, `float`, or `double`). The individual library pages note which parameters accept what.
+
+## Why Not Just Load Everything?
+
+Many languages make basic functions like `print` available everywhere without asking. Oli-Nat makes you opt in for a few reasons:
+
+- **It keeps your program's names clear.** Every library function becomes a global name. Only loading the libraries you need means fewer names you might accidentally collide with.
+- **It shows what a program depends on.** Reading the `#pullf` lines at the top of a file tells you right away whether it touches files, uses randomness, or reads user input.
+- **It keeps the language core small.** The core language is just the language. Everything else is a library that can be added to, documented, and tested on its own, which is also what makes adding a new function such an approachable first contribution.
+
+## The Playground vs. the Native Interpreter
+
+The [playground](https://olinat.net/playground) runs the real interpreter compiled to WebAssembly, so the standard library is the same code in both places. A few functions behave a little differently in a browser, though, simply because a web page isn't a real terminal or operating system:
+
+- **`intake()`** pauses the program and waits for you to type into the playground's terminal, then continues once you press Enter. It works just like it does natively; it's just a lot more work behind the scenes.
+- **File IO** works, but the files live in a temporary in-browser file system, not on your computer. They disappear once the page reloads, and a program can't open files from your own machine.
+- **Chronos** timing functions like `clock` and `sleep` don't always behave as precisely in the browser as they do natively. See the [Chronos](https://olinat.net/docs/stdlib/chronos) page for details.
+
+If something in the playground behaves differently than it does on your machine and isn't listed here, please [open an issue](https://github.com/NateTheGrappler/Oli-Nat-Programming-Language-Docs-Playground/issues) so I can look into it.
+
+## Under the Hood
+
+Every standard library function is a "native" C function with the same signature, `Value myFunctionNative(int argCount, Value* args, struct Vm* vm)`. When the compiler reaches a `#pullf`, it does two things for each function in that library: it registers the C function with the virtual machine as a global, and it gives the type checker that function's parameter and return types. From then on, a call to `sqrt` compiles to the exact same bytecode as a call to a function you wrote; the VM just runs C code instead of Oli-Nat bytecode when it gets there.
+
+For the full story, see [Functions & Natives](https://olinat.net/docs/system-design/functions) in the System Design section. If you want to add a function of your own, the [Project Structure](https://olinat.net/docs/contributing/project-structure) page has a step-by-step checklist.
