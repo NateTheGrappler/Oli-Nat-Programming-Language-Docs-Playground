@@ -145,6 +145,70 @@
     margin: 32px 0;
 }
 
+.doc-movement {
+    display: flex;
+    gap: 16px;
+    max-width: 1080px;
+    margin: 48px auto 16px;
+    padding-top: 24px;
+    border-top: 1px solid #2E2A26;
+}
+
+.doc-movement-link {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 1 50%;
+    padding: 7px 18px;
+    background-color: #1D1F23;
+    border: 1px solid #5d5c5f;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.doc-movement-link:hover {
+    border-color: #EF8D38;
+    background-color: #1A1C20;
+}
+
+.doc-movement-link:focus-visible {
+    outline: 2px solid #F9CB22;
+    outline-offset: 2px;
+}
+
+.doc-movement-next {
+    text-align: center;
+    flex: 1;
+}
+
+.doc-movement-previous {
+    text-align: center;
+    flex: 1;
+}
+
+
+.doc-movement-title {
+    font-family: 'Inter', system-ui, sans-serif;
+    font-size: 16px;
+    font-weight: 600;
+    color: #E8E6E1;
+    transition: color 0.15s ease;
+}
+
+.doc-movement-link:hover .doc-movement-title {
+    color: #EF8D38;
+}
+
+@media (max-width: 600px) {
+    .doc-movement {
+        flex-direction: column;
+    }
+
+    .doc-movement-link {
+        flex-basis: auto;
+    }
+}
 
 
 /*The things down below are specific to styles for actual .mdx elements, just easier to put them here then restructure the whole way everything loads in*/

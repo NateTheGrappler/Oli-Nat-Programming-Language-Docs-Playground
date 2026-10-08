@@ -67,6 +67,7 @@ export const sections: Section[] = [
             {slug: 'defintions-methods', title: 'Definitons & Methods'},
             {slug: 'constructors', title: 'Constructors'},
             {slug: 'instances', title: "Class Instances"},
+            {slug: 'instances', title: "Class Inheritance"},
             {slug: 'typing-calling', title: 'Typing & Calling'}, //TODO: this one might be a bit redudant, I'll see when I write the docks
         ]}
     ],
@@ -97,27 +98,6 @@ export const sections: Section[] = [
 
  },
 
-
- //cover the more advanced topics of the language, including things like recursion in functions, closures, inheritance, and all of that real fun stuff
- {
-    id: 'advancedGuides',
-    label: 'Advanced Guides',
-    route: '/docs/advanced-guides',
-    pages:
-    [
-        {slug: 'recursion', title: 'Recursion'},           //honestly the lighter of the topics, handle recursion and it's behavior, maybe a bit about stack size and maximum language depth
-        {slug: 'closures', title: 'Closures'},             //Introduct the concept of closures, give some examples and behaviors of closures and capturing upvalues between function calls
-        {slug: 'inheritence', title: 'Inheritence', children: 
-            [
-                //pretty basic stuff in all honesty as a concept, but classes felt a bit too overt in the simple guides, and this is more advanced programming concepts anyways
-                {slug: 'inheritenceSyntax', title: 'Syntax'},
-                {slug: 'thiskeyword', title: "'this' Keyword"},
-                {slug: 'superkeyword', title: "'super' Keyword"}
-            ]},
-    ],
-    nextRoute: '/docs/system-design/introductionToDesign',
-    nextRouteLabel: 'System Design'
- },
 
  {
     id: 'architecture',
