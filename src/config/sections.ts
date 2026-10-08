@@ -67,8 +67,7 @@ export const sections: Section[] = [
             {slug: 'defintions-methods', title: 'Definitons & Methods'},
             {slug: 'constructors', title: 'Constructors'},
             {slug: 'instances', title: "Class Instances"},
-            {slug: 'instances', title: "Class Inheritance"},
-            {slug: 'typing-calling', title: 'Typing & Calling'}, //TODO: this one might be a bit redudant, I'll see when I write the docks
+            {slug: 'Inheritance', title: "Class Inheritance"},
         ]}
     ],
     nextRoute: '/docs/stdlib/overview',
@@ -93,8 +92,8 @@ export const sections: Section[] = [
         {slug: 'strings', title: '#pullf String'},          //how to mess around with things it's unfortunately not built in
         {slug: 'utils', title: '#pullf utils'},             //the length and assert functions
     ],
-    nextRoute: '/docs/advanced-guides/recursion',
-    nextRouteLabel: 'Advanced Guides'
+    nextRoute: '/docs/system-design',
+    nextRouteLabel: 'System Design'
 
  },
 
