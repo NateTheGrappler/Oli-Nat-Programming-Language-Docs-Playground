@@ -1,0 +1,217 @@
+# Class Instances
+
+A class on its own is really just a blueprint. It describes what fields and methods something *should* have, but it doesn't actually hold any data. To actually use a class, you create an **instance** of it: a real object, built from that blueprint, with its own copy of every field. <br />
+
+You can create as many instances of a class as you want, and each one stores its own data completely separately from the others. This page covers how to create instances, how to get at their fields and methods with the dot operator, and how instances behave when you pass them around your program.
+
+## Creating an Instance
+
+To create an instance, call the class name like a function, and store the result in a variable that has the class as its type:
+
+```java
+#pullf io
+
+class Player
+{
+    make int health = 100;
+    make string name = "hero";
+}
+
+make Player p = Player();
+```
+
+The type of the variable is just the name of the class, the same way you would write `int` or `string` for any other variable. Calling `Player()` runs the class's constructor, which sets up all of the fields for the new instance. See [Constructors](https://olinat.net/docs/guides/constructors) for how to write your own.
+
+## The Dot Operator
+
+Once you have an instance, you use the **dot operator** `.` to get to anything inside of it. Write the instance's variable name, a dot, and then the name of the field or method you want.
+
+### Reading Fields
+
+```java
+println(p.health); //100
+println(p.name);   //hero
+```
+
+A field can be used anywhere a regular variable could be, like inside of math, string concatenation, or `if` conditions:
+
+```java
+#pullf types
+#pullf io
+
+if (p.health > 50)
+{
+    println(p.name + " is doing fine with " + intToStr(p.health) + " HP");
+}
+```
+
+### Changing Fields
+
+To change a field, assign to it with `=` just like a variable. The compound operators like `+=`, `-=`, and `++` all work on fields too:
+
+```java
+p.name = "Oli";
+p.health -= 25;
+p.health++;
+
+println(p.name);   //Oli
+println(p.health); //76
+```
+
+The new value still has to match the field's type, so the type checker will stop you from giving a field the wrong kind of value before your program runs:
+
+```java
+class Player
+{
+    make int health = 100;
+}
+
+make Player p = Player();
+p.health = "full";
+```
+
+```
+:>>  | TYPE ERROR | at line 7: Mismatch typing when attempting to assign a new value to a  class instance's field]
+```
+
+You also can't add new fields to an instance. Every instance has exactly the fields its class defines, nothing more, so `p.mana = 50;` is an `Undefined field.` error.
+
+### Calling Methods
+
+Methods are called with the dot operator too, just with parentheses and any arguments after the name, like a regular function call:
+
+```java
+#pullf stdlib
+
+class Player
+{
+    make int health = 100;
+
+    make empty takeDamage(int amount)
+    {
+        this.health -= amount;
+    }
+
+    make bool isAlive()
+    {
+        return this.health > 0;
+    }
+}
+
+make Player p = Player();
+p.takeDamage(30);
+println(p.health); //70
+
+if (p.isAlive())
+{
+    println("Still standing!");
+}
+```
+
+Methods that return a value can be used in expressions just like a function would, and the type checker makes sure the arguments you pass in match what the method expects, both in number and type.
+
+### Chaining Dots
+
+If one of an instance's fields is *itself* an instance of another class, you can keep chaining dots to get further in:
+
+```java
+#pullf io
+
+class Weapon
+{
+    make int damage = 7;
+}
+
+class Player
+{
+    make Weapon sword = Weapon();
+}
+
+make Player p = Player();
+println(p.sword.damage); //7
+
+p.sword.damage = 20;
+println(p.sword.damage); //20
+```
+
+Read `p.sword.damage` from left to right: start at `p`, go into its `sword` field, and then get that weapon's `damage` field.
+
+## Instances Store Their Own Data
+
+Every instance gets its own copy of every field, so changing one instance never changes another:
+
+```java
+#pullf io
+
+make Player hero = Player();
+make Player villain = Player();
+
+villain.takeDamage(90);
+
+println(hero.health);    //100
+println(villain.health); //10
+```
+
+Inside of a method, the `this` keyword always refers to whichever instance the method was called on. That's how the same `takeDamage()` method can change `hero` in one call and `villain` in the next.
+
+## Instances Are References
+
+This is the most important thing to understand about instances. A variable doesn't hold the instance itself, it holds a **reference** to it, kind of like an address that points to where the instance actually lives in memory. <br />
+
+That means when you assign one instance variable to another, you don't get a copy. You get two variables pointing to the *same* instance:
+
+```java
+#pullf io
+
+make Player a = Player();
+make Player b = a;
+
+b.health = 1;
+println(a.health); //1, a and b are the same instance!
+```
+
+If you've used Java, Python, or JavaScript before, this is the same way objects work in those languages. Regular values like `int`, `double`, and `bool` don't work this way though. Copying a field into a normal variable gives you a separate copy of the value:
+
+```java
+make int hp = a.health;
+hp = 500;
+println(a.health); //still 1
+```
+
+Functions can also create and return instances, which is a handy way of building an instance with some setup already done:
+
+```java
+#pullf io
+
+make Player makeHero()
+{
+    make Player h = Player();
+    h.name = "Oli";
+    return h;
+}
+
+make Player q = makeHero();
+println(q.name); //Oli
+```
+
+## Printing an Instance
+
+If you print an instance directly, Oli-Nat prints the word `INSTANCE` followed by the name of its class, instead of its fields:
+
+```java
+println(p); //INSTANCE-Player
+```
+
+This is mostly useful for debugging, to double check what class something actually is. To see an instance's data, print its fields individually.
+
+## Current Limitations
+
+Classes are one of the newer parts of Oli-Nat, and there are a few things instances can't do *yet*:
+
+- **Comparing instances with `==`** is a runtime error, even when comparing an instance with itself.
+- **Passing an instance into a function** as a parameter doesn't work yet. A parameter typed as a class, like `make empty heal(Player p)`, gives an `Unknown class type called.` error. Returning an instance from a function works fine though, as shown above.
+- **Arrays of instances** can be created, but you can't use the dot operator on their elements, so `team[0].health` is a type error.
+- **Replacing an instance field** with a whole new instance, like `p.sword = Weapon();`, is a runtime error. Changing the fields *inside* of it, like `p.sword.damage = 20;`, works fine.
+
+All of these are on the list to be fixed, and any of them would make a great contribution to the language. See [Ways to Contribute](https://olinat.net/docs/contributing/how-to-help) if you're interested!
+

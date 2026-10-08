@@ -1,0 +1,161 @@
+# Constructors
+
+Constructors in classes are special methods that are basically used in order to instantiate a given class. For Oli-Nat they can come in two different flavors. One being the built-in constructor that every class gets for free, and the other being a custom constructor that you can write yourself. <br />
+
+Either way, you call a constructor the same way: by using the class name like a function. This creates a brand new [instance](https://olinat.net/docs/guides/instances) of that class, which you can then store in a variable.
+
+```java
+make Player p = Player();
+```
+
+## The Built-In Constructor
+
+Every class in Oli-Nat comes with a constructor already, even if you never write one. Calling the class name with no arguments creates a new instance where every field starts out with the value it was given in the class definition.
+
+```java
+#pullf io
+
+class Player
+{
+    make int health = 100;
+    make string name = "hero";
+}
+
+make Player p = Player();
+println(p.health); //100
+println(p.name);   //hero
+```
+
+Each call creates a completely separate instance, so changing the fields of one instance never affects another one:
+
+```java
+make Player p1 = Player();
+make Player p2 = Player();
+
+p1.health = 50;
+println(p2.health); //still 100
+```
+
+If a field is declared without a starting value, the built-in constructor fills it in with a default value based on its type:
+
+| Type     | Default value               |
+| -------- | --------------------------- |
+| `int`    | `0`                         |
+| `double` | `0.000000`                  |
+| `float`  | `0.000000f`                 |
+| `bool`   | `false`                     |
+| `string` | `""` (an empty string)      |
+| arrays   | an empty array of that type |
+
+The built-in constructor is great for simple classes, but every instance it creates starts out exactly the same. If you want each instance to start out differently, that's where custom constructors come in.
+
+## Custom Constructors
+
+A custom constructor is a method that has the **exact same name as the class**, and a return type of `empty`. It can take in any parameters you like, and is generally used to set the starting values of an instance's fields.
+
+```java
+#pullf io
+
+class Player
+{
+    make int health = 100;
+    make string name = "hero";
+
+    make empty Player(int newHealth, string newName)
+    {
+        this.health = newHealth;
+        this.name = newName;
+    }
+}
+
+make Player p = Player(50, "warrior");
+println(p.health); //50
+println(p.name);   //warrior
+```
+
+When you call `Player(50, "warrior")`, Oli-Nat first creates the instance with all of the fields set to their values from the class definition, and *then* runs your constructor on it. This means that any fields you don't touch in your constructor keep their original values:
+
+```java
+#pullf io
+
+class Box
+{
+    make int width = 10;
+    make int height = 20;
+
+    make empty Box(int newWidth)
+    {
+        this.width = newWidth;
+    }
+}
+
+make Box b = Box(99);
+println(b.width);  //99
+println(b.height); //20
+```
+
+Inside a constructor, you use the `this` keyword to get to the instance being created, the exact same way you would in any other method. A constructor can also call other methods on the instance, which is handy if you already have a method that does the setup work:
+
+```java
+class Counter
+{
+    make int count = 0;
+
+    make empty Counter(int start)
+    {
+        this.setCount(start);
+    }
+
+    make empty setCount(int newCount)
+    {
+        this.count = newCount;
+    }
+}
+```
+
+## Constructor Rules
+
+Constructors in Oli-Nat are fairly strict, and the type checker catches most mistakes before your program ever runs. <br />
+
+**A class can only have one constructor.** Oli-Nat doesn't support having several constructors with different parameters (sometimes called *overloading*) like Java or C++ do, so if you need different ways to set up an instance, use one constructor and set the rest of the fields afterwards. <br />
+
+**The arguments have to match the constructor's parameters**, both in how many there are and in their types, just like a regular function call. Using the `Player` class from above:
+
+```java
+make Player p = Player(50);
+```
+
+```
+:>>  | SYNTAX ERROR | at line 15: Wrong number of arguments passed to constructor.]
+```
+
+```java
+make Player p = Player("50", "warrior");
+```
+
+```
+:>>  | TYPE MISMATCH ERROR | at line 15: Constructor argument type does not match parameter type.]
+```
+
+**Once a class has a custom constructor, you have to use it.** Writing a custom constructor replaces the built-in one, so calling `Player()` with no arguments on the class above is an error. This one is currently only caught while the program is running, rather than before:
+
+```
+:>>  INVALID CALL ERROR -- Function call got either more or less arguements than expected.
+```
+
+**And passing arguments to a class with no custom constructor is an error**, since the built-in constructor doesn't take any:
+
+```java
+class Point
+{
+    make int x = 0;
+}
+
+make Point pt = Point(5);
+```
+
+```
+:>>  | TYPE ERROR | at line 6: Arguments passed to a class with no constructor.]
+```
+
+Oli-Nat currently decides a method is the constructor by checking whether its name *starts with* the class name. That means a method like `PlayerReset()` inside of a `Player` class gets mistaken for the constructor. Until that's fixed, avoid starting any other method name with the name of its class.

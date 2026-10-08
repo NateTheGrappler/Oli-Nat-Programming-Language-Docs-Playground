@@ -1,0 +1,207 @@
+# Class Inheritance
+
+Inheritance lets one class build on top of another. The new class (the *subclass*, or child) automatically gets all of the fields and methods of the class it inherits from (the *superclass*, or parent), and can then add its own on top, or change how some of the parent's methods behave. <br />
+
+This is really useful when you have several classes that share a lot in common. Instead of copying the same fields and methods into every single one, you write them once in a parent class, and have each child class inherit them.
+
+## Inheriting From a Class
+
+To make a class inherit from another, put an arrow `->` and the name of the parent class right after the new class's name:
+
+```java
+#pullf io
+
+class Vehicle
+{
+    make string brand = "Generic";
+    make int wheels = 4;
+
+    make empty honk()
+    {
+        println("Beep beep!");
+    }
+}
+
+class Car -> Vehicle
+{
+    make string model = "Sedan";
+}
+
+make Car c = Car();
+println(c.brand);  //Generic
+println(c.wheels); //4
+println(c.model);  //Sedan
+c.honk();          //Beep beep!
+```
+
+`Car` never declares `brand`, `wheels`, or `honk()`, but it has all of them anyway, because it inherited them from `Vehicle`. It just adds its own `model` field on top. <br />
+
+Inheritance can also go as many levels deep as you want. A class inherits everything from its parent, *including* everything its parent inherited:
+
+```java
+#pullf io
+
+class A
+{
+    make int x = 1;
+}
+class B -> A
+{
+    make int y = 2;
+}
+class C -> B
+{
+    make int z = 3;
+}
+
+make C obj = C();
+println(obj.x); //1
+println(obj.y); //2
+println(obj.z); //3
+```
+
+Each class can only inherit from a single parent, and the parent class has to be defined *above* the child class in your file. If it isn't, or you misspell its name, you'll get an error as soon as the program reaches the child class:
+
+```
+:>>  RUNTIME ERROR -- Undefined Global variable.
+```
+
+## Overriding Methods
+
+If a child class defines a method with the same name as one of its parent's methods, the child's version replaces the parent's. This is called *overriding* a method, and it's how a child class changes the behavior it inherited:
+
+```java
+#pullf io
+
+class Shape
+{
+    make string describe()
+    {
+        return "A shape";
+    }
+}
+
+class Circle -> Shape
+{
+    make string describe()
+    {
+        return "A circle";
+    }
+}
+
+make Shape s = Shape();
+make Circle c = Circle();
+
+println(s.describe()); //A shape
+println(c.describe()); //A circle
+```
+
+The parent class isn't affected at all, so `Shape` instances still use the original version. Only `Circle` instances, and any classes that inherit from `Circle`, get the new one. <br />
+
+Overriding works for methods only, so **don't redeclare a field the parent already has**. Oli-Nat currently accepts it without an error, but quietly keeps the parent's version of the field, which can be very confusing. If you want a child class to start out with a different value for an inherited field, set it in the child's constructor instead (see below).
+
+## Calling the Parent's Version with pullf
+
+Sometimes you don't want to *replace* the parent's method completely, you just want to add a little extra on top of it. For that, Oli-Nat has the `pullf` keyword, which lets a method call its parent class's version of a method, even if the current class overrode it:
+
+```java
+#pullf io
+
+class Animal
+{
+    make empty speak()
+    {
+        println("Generic animal sound");
+    }
+}
+
+class Dog -> Animal
+{
+    make empty speak()
+    {
+        pullf.speak();
+        println("Woof!");
+    }
+}
+
+make Dog d = Dog();
+d.speak();
+//Generic animal sound
+//Woof!
+```
+
+If you've used Java or Python before, `pullf` is Oli-Nat's version of `super`. And yes, it's the same word as in `#pullf`, since both of them *pull* something in from somewhere else, it was an idea from a friend of mine and I wanted to pay him some homage. <br />
+
+A few things to know about `pullf`:
+
+- It goes to the parent of the instance's class. If `C` inherits from `B`, which inherits from `A`, then `pullf.hi()` inside of `C` calls `B`'s version of `hi()`, not `A`'s.
+
+- Be careful using `pullf` in a class that will itself be inherited from. Right now, if `B.hi()` calls `pullf.hi()`, and you call `hi()` on an instance of `C`, the `pullf` looks at `C`'s parent (`B`) instead of `B`'s parent (`A`), so `B.hi()` ends up calling itself forever and crashes the interpreter. This is a known bug. Until it's fixed, only use `pullf` in classes that nothing else inherits from.
+
+- It can only be used inside of a class's methods. Using it anywhere else is an error: `Cannot use 'pullf' outside of a class`.
+
+- It's only for calling methods. To get to an inherited *field*, just use `this` like normal, since inherited fields belong to the instance just like its own fields do.
+
+## Inheritance and Constructors
+
+Constructors are the one thing that **isn't** inherited. A child class starts out with only the [built-in constructor](https://olinat.net/docs/guides/constructors), even if its parent has a custom one. That means if you want a child class to take in arguments when it's created, you need to give it its own constructor:
+
+```java
+#pullf io
+
+class Pet
+{
+    make string name = "";
+    make int age = 0;
+}
+
+class Dog -> Pet
+{
+    make string breed = "unknown";
+
+    make empty Dog(string n, int a, string b)
+    {
+        this.name = n;
+        this.age = a;
+        this.breed = b;
+    }
+}
+
+make Dog d = Dog("Rex", 4, "shepherd");
+println(d.name);  //Rex
+println(d.age);   //4
+println(d.breed); //shepherd
+```
+
+As you can see, a child's constructor can set inherited fields like `name` and `age` using `this`, exactly the same way it sets its own. <br />
+
+You also can't call the parent's constructor with `pullf`, so if the parent's constructor does some setup work, the child's constructor has to do that work itself.
+
+## Using a Child Class Where a Parent Is Expected
+
+Since a child class has everything its parent has, a variable that is typed as the parent class can hold an instance of the child class. When you call a method on it, Oli-Nat uses the version from the *actual* class of the instance, so overridden methods still work the way you'd expect:
+
+```java
+#pullf io
+
+class Animal
+{
+    make empty speak()
+    {
+        println("...");
+    }
+}
+
+class Dog -> Animal
+{
+    make empty speak()
+    {
+        println("Woof!");
+    }
+}
+
+make Animal pet = Dog();
+pet.speak(); //Woof!
+```
+
+This is still an early part of the language, and it doesn't work everywhere yet. For example, an array of a parent class can't hold child class instances.
