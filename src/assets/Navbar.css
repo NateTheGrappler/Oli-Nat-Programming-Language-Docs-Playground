@@ -166,4 +166,5 @@
 .navbar-openSidebar {
     background: none;
     border: 0;
+    cursor: pointer;
 }

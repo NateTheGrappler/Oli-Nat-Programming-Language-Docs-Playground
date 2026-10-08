@@ -1,0 +1,249 @@
+# File Input / Output
+
+The management of files is very important in any programming language, and is very useful for things like scripting and general management. Oli-Nat has the full ability to read from, write to, and append to files, which makes it much more potent and interactive with the operating system. <br />
+
+This library adds real bite to the language, and allows for manipulation of real data within your application, allowing for a large amount of expansion in usability. While this library does, in part, work in the web browser; it should be noted the files created are temporary and will be deleted once you refresh. <br />
+
+Things have been tested on a real filesystem, but the web browser is still a bit new and so the behavior of this library here is a bit unpredictable. If you find any issues, please report them [here](https://olinat.net/docs/contributing/how-to-help). <br />
+
+One thing to keep in mind is that relative paths, like `"data.txt"`, are relative to the folder you run the interpreter from, not the folder your `.oli` file is in. So if you run `Oli_Nat games/save.oli` from your home folder, `readFile("data.txt")` looks for `data.txt` in your home folder, not in `games/`. <br />
+
+Every function in this library that fails, like reading a file that does not exist or deleting one that is already gone, produces a runtime error, and your program stops at that line. If you are not sure a file is there, check with [`fileExists()`](#fileexists) first. <br />
+
+
+## readFile();
+
+This is the first function of the `#pullf fileIO` library, and it takes in one parameter, that being the path/location of the file you want to open and read. It then goes through that file, and outputs the entire string/content of said file as the return value. It is used like this:
+
+```java
+#pullf fileIO
+#pullf io
+
+make string fileContent = readFile("/path/to/file.txt");
+println(fileContent); //"content that was written in the file"
+```
+
+The function does read the entire file at once and return it as a single string, and there is not currently a function that reads a file line by line or word by word, but there is an [open issue on github](https://github.com/NateTheGrappler/OliNat-Programming-Language/issues/15) for exactly that if you feel up to the challenge. See also the [contributing](https://olinat.net/docs/contributing/getting-started) portion of the docs to see how you can contribute to Oli-Nat!
+
+### Under the hood for readFileNative();
+
+```c
+Value readFileNative(int argCount, Value* args, struct Vm* vm) //get all content from file
+{
+    char* path = AS_CSTRING(args[0]);
+    FILE* file = fopen(path, "r");
+
+    if (file == NULL)
+    {
+        char result[100];
+        char errorMsg[] = "Unable to open up file at: ";
+        snprintf(result, sizeof(result), "%s %s", errorMsg, path);
+        runtimeError(vm, result, "FILE ERROR");
+        return CREATE_EMPTY_VAL();
+    }
+
+    fseek(file, 0, SEEK_END);
+    long size = ftell(file);
+    rewind(file);
+
+    char* buffer = ALLOCATE(char, size+1, vm);
+    if (buffer == NULL)
+    {
+        fclose(file);
+        runtimeError(vm, "Not enough memory to read file.", "MEMORY ERROR");
+        return CREATE_EMPTY_VAL();
+    }
+
+    size_t bytesRead = fread(buffer, 1, size, file);
+    buffer[bytesRead] = '\0';
+    fclose(file);
+
+    ObjString* result = copyString(buffer, (int)bytesRead, vm);
+    FREE(char, buffer, vm);
+    return CREATE_OBJECT_VAL((Obj*)result);
+
+}
+```
+
+Under the hood it really is very simple, you just read a file how you would in C. In C all strings are just character arrays, and the only real issue that exists with that is when reading a file you do not know when the file will end in memory. So you need to be able to know the size of allocation before you actually allocate anything. <br />
+
+This is a little bit verbose of course, but you just use the `fopen` function with the path the user passed in, make sure that you were able to open it up so you can mess with it, use `fseek()` to find out where the file ends, and then allocate a buffer of that space and begin to read the file. <br />
+
+There is obviously a bit of nuance in the sense that you need to `rewind()` back to the start of the file before reading, since `fseek()` left you at the end of it, and make sure you do not run out of memory while reading as well, but overall you just read the file with C functions and convert the C string to a Oli-Nat string and return that for the user.
+
+## writeFile();
+
+If we can read a file in Oli-Nat, we should be able to write to that file as well. The two functions are not much different, the only real difference is now there are two parameters, the first being the path of the file, and then the second being the content you wish to write. The function also does not return anything. <br />
+
+```java
+#pullf fileIO
+#pullf io
+
+writeFile("/path/to/file.txt", "Write this information");
+
+println(readFile("/path/to/file.txt")); //prints "Write this information"
+```
+
+The `writeFile()` native function rewrites the entire file, this means that if there is an existing file, either empty or with content, it will be overwritten completely on the `writeFile()` function call. This also means that if there is currently no file at the location you request to write to, this function will actually create that file.
+
+### Under the hood for writeFileNative();
+
+```c
+Value writeFileNative(int argCount, Value* args, struct Vm* vm)     //create a new file and then write to it
+{
+    char* path = AS_CSTRING(args[0]);
+    char* content = AS_CSTRING(args[1]);
+
+    FILE* file = fopen(path, "w");
+    if (file == NULL)
+    {
+        char result[100];
+        char errorMsg[] = "Unable to open up file for writting: ";
+        snprintf(result, sizeof(result), "%s %s", errorMsg, path);
+        runtimeError(vm, result, "FILE ERROR");
+        return CREATE_EMPTY_VAL();
+    }
+    fputs(content, file);
+    fclose(file);
+    return CREATE_EMPTY_VAL();
+
+}
+```
+
+This function in implementation is actually even easier than `readFileNative()`, since we already have all of the pieces we need from the user, this being the path of the file, as well as the content to write to it. We convert those from Oli-Nat strings to C strings using `AS_CSTRING` macro. <br />
+
+With this we can now open the file, and we do not need to worry about the size of a char buffer to allocate, so we can instead simply just use `fputs & fclose` after getting the file, and that really is all there is to it. <br />
+
+There is a slight null check in which we allocate a char buffer, but that is purely for the error message given to the VM, and not something to worry about, as it is a very rare edge case.
+
+## appendFile();
+
+Sometimes when writing to a file, you do not want to keep on erasing and rewriting the whole file, and sometimes just want to add in some content to the end of the file. This is exactly where `appendFile()` comes in, and it is super great for when you want to keep track of data long term without constantly rereading a large file and having it take up your memory.
+
+```java
+#pullf fileIO
+#pullf io
+
+println(readFile("/path/to/file.txt")); //same file from before, prints "Write this information"
+
+appendFile("/path/to/file.txt", "\n add this to the file");
+
+//same file, but now prints:
+//Write this information
+// add this to the file
+println(readFile("/path/to/file.txt"));
+```
+
+The function takes in two parameters, the first being the file path that you wish to append to, and then the second being the content you wish to write to the file. The main difference here however being that the new content is added onto the end of the file instead of replacing it. If there is no file at the path you point to yet, `appendFile()` will create one for you, just like `writeFile()` does. <br />
+
+The function once again returns nothing, but does serve well as a way to append new content to files very easily, letting you do things like say store player stats inside of your game or something of the sort.
+
+### Under the hood for appendFileNative();
+
+```c
+Value appendFileNative(int argCount, Value* args, struct Vm* vm)    //write onto the file, append to it 
+{
+    char* path = AS_CSTRING(args[0]);
+    char* content = AS_CSTRING(args[1]);
+
+    FILE* file = fopen(path, "a");
+    if (file == NULL)
+    {
+        char result[100];
+        char errorMsg[] = "Unable to open up file for writting: ";
+        snprintf(result, sizeof(result), "%s %s", errorMsg, path);
+        runtimeError(vm, result, "FILE ERROR");
+        return CREATE_EMPTY_VAL();
+    }
+    fputs(content, file);
+    fclose(file);
+    return CREATE_EMPTY_VAL();
+}
+```
+
+This function implementation is actually almost exactly the same as `writeFileNative()` with there being only a single character difference. `FILE* file = fopen(path, "a");` not `"w"`, these two standing for write and append of course. <br />
+
+That is literally it, you simply just change the way that the C function reads the file for you and it adds the implementation to Oli-Nat, the actual implementation for `fopen` is very interesting however, so please see the [actual C documentation for fopen and it's mechanics](https://devdocs.io/c/io/fopen)
+
+## fileExists();
+
+This function is really a helper function for users who want their code to be just a little bit safer. All it does is take in a path for the file you wish to see if it exists, and then it will return a boolean value of whether or not Oli-Nat was able to open the file:
+
+```java
+#pullf fileIO
+#pullf io
+
+//returns true or false based on if file can be opened
+if(fileExists("/path/to/file.txt"))
+{
+	//you know the file exists, so you can read it.
+	println(readFile("/path/to/file.txt"));
+}
+else
+{
+	println("File was unable to be opened");
+}
+```
+
+This is just one of those quality of life functions that lets you practice good programming standards and practices inside of Oli-Nat. It's useful for making sure that your program does not crash just because of a random missing file, letting you instead handle that error gracefully.
+
+### Under the hood for fileExistsNative();
+
+```c
+Value fileExistsNative(int argCount, Value* args, struct Vm* vm)    //bool to see if file exists at path
+{
+    char* path = AS_CSTRING(args[0]);
+    FILE* file = fopen(path, "r");
+    if (file == NULL) return CREATE_BOOL_VAL(false);
+    fclose(file);
+    return CREATE_BOOL_VAL(true);
+}
+```
+
+The entire body for this function is just the null check that has been occurring in each of the previous functions. This may seem redundant, so why have the check in both places? Every other function checks whether the file opened because handing a `NULL` file to C would crash the interpreter itself. But that check ends your program with a runtime error, so `fileExists()` lets you check first and handle a missing file yourself instead. <br />
+
+Either way, you simply just open up the file at the given path using `fopen()`, and if the resulting pointer is null, you return false, otherwise you return true. One small quirk of this is that on Linux and macOS, `fopen()` can successfully open a folder, so `fileExists()` will also return `true` for a folder path.
+
+## deleteFile();
+
+This function really gives this library the kick that I believe it needed. As the function name suggests, this deletes the file at the specified path, returning an empty value after doing so. 
+
+```java
+#pullf fileIO
+#pullf io
+
+writeFile("/path/to/file.txt", "Hello Filesystem!"); //rewrites to file at path with content
+
+println(readFile("/path/to/file.txt")); //:> Hello Filesystem!
+
+deleteFile("/path/to/file.txt"); //deletes file at that path
+
+println(readFile("/path/to/file.txt")); //file is gone, so this is a runtime error:
+//:>>  FILE ERROR -- Unable to open up file at:  /path/to/file.txt
+```
+
+This is generally how something like this might be used, if there is a lot of temporary files for example you might want to delete programmatically, then you can do so using this function. Equally, if there is also a file you only want to exist for the runtime of your program, you can create it and delete it in the same run of your program. <br />
+
+It should be made known that even though a file not existing at a given path is technically not a logical error for the `deleteFile()` function, it is still a runtime error in the language for consistency's sake, and so that way the intent of the user and output of the program is more clear.
+
+### Under the hood for deleteFileNative()
+
+```c
+Value deleteFileNative(int argCount, Value* args, struct Vm* vm)    //delete file at path
+{
+    char* path = AS_CSTRING(args[0]);
+    if (remove(path) != 0)
+    {
+        char result[100];
+        char errorMsg[] = "Unable to delete file at path: ";
+        snprintf(result, sizeof(result), "%s %s", errorMsg, path);
+        runtimeError(vm, result, "FILE ERROR");
+        return CREATE_EMPTY_VAL();
+    }
+    return CREATE_EMPTY_VAL();
+}
+```
+
+The implementation here is very simple as well, you simply convert the Oli-Nat string into a C string so you can get a given path, and then you call the C standard library function `remove()` at your path. <br />
+
+This naturally deletes the file at that given directory location, and then there is a simple check to see if the file was actually deleted or not. Once again, even though it is not a logical error for the file to not exist when a user tries to delete it, in order to remain transparent, it is best to tell the user that the file they tried to delete does not exist.

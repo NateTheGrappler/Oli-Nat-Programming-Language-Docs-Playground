@@ -1,0 +1,202 @@
+
+# Types & Conversions
+
+Oli-Nat is a *statically typed* bytecode VM. This means that each instance of an object, whether it be a basic object like a variable, or something more complex like a class or a function, is *typed* <br />
+
+For seeing how types are declared see free to see [the basic types and typing guide](https://olinat.net/docs/guides/types). <br />
+
+Nonetheless, with the introduction of types into a language, it is natural that you would want to be able to **change types** between different values. Converting a double to an integer, or a string to an integer, and all other such values. In fact this is so common in typed languages it is often built right into the syntax. <br />
+
+This however is not the case for Oli-Nat, each type conversion has a function that tends to follow the structure of `aToB`, following the `camelcase` convention. These functions each take in one parameter, which is generally of type "a", and then, if it is logically valid, return the same value but converted to type "b" <br />
+
+At the very bottom of this page will be a table with a list of all of the given functions that are included in this library, given how similar a lot of these functions are, the following documentation will only cover a few examples as most of them are the same, with a few edge cases.
+
+## intToX();
+
+For conversions between an integer to another type, there is generally very little that needs to be done, you simply import the library, change the type, and then output it to another variable.
+
+```java
+#pullf types
+#pullf io
+
+make int x = 32;
+print(x); //INT-32
+
+make double y = intToDouble(x);
+print(y); //DOUBLE-32.0
+
+//can also convert outright without new assignment
+print(intToDouble(x);); //DOUBLE-32.0
+```
+
+Native type changing functions always return a value, and therefore you can always use them inside of expressions or as parameters to other native or none-native functions. They are basically the same thing as `(double)32` in a language like C, but the syntax is less confusing because it's just an outright function that says what the conversion is.
+
+### Under The Hood for xToStrNative();
+
+```c
+Value intToStrNative(int argCount, Value* args, struct Vm* vm)
+{
+    char str[12];
+    snprintf(str, sizeof(str), "%d", GET_INT_VAL(args[0]));
+    ObjString* returnString = copyString(str, (int)strlen(str), vm);
+    return CREATE_OBJECT_VAL((Obj*)returnString);
+}
+```
+
+The implementation for strings is the one I want to actually point out here simply for the fact that it is much more interesting than the one liner for `return CREATE_DOUBLE_VAL((double)GET_INT_VAL(args[0]))` for the other functions. <br />
+
+Notice that the first thing we do is allocate a char array of size 12, this is because an integer value only ever maxes out at 2.1 billion, which is 12 digits in size. Simply however, we then just convert the type of the int into populating the char buffer, and then intern that string inside of the VM, see [system design for how strings are interned](https://olinat.net/docs/system-design/introductionToDesign)
+
+## floatToX 
+
+These are very similar to that of integers, both in usecase as well as implementation
+
+```java
+#pullf types
+#pullf io
+
+make float x = 32.123f;
+print(x); //FLOAT-32.123f
+
+make int y = floatToInt(x);
+print(y); //INT-32
+
+//can also convert outright without new assignment
+print(floatToInt(x)); ////INT-32
+```
+
+The conversion of a float to any other type is basically the same to that of integers or doubles. In general, if you are moving down a type, then the excess information is lost in the sense that it gets truncated. As can be seen in the example above <br />
+
+Let it be known that `float` values specifically inside of Oli-Nat hold the `f` next to them. Therefore this is their inner representation, and so if you run something like `floatToStr(32.123f)`, the `f` does come included. The string will come out as `"32.123f"`
+
+### Under the Hood for floatToX();
+
+```c
+Value floatToIntNative(int argCount, Value* args, struct Vm* vm)
+{
+    return CREATE_INT_VAL((int)GET_FLOAT_VAL(args[0]));
+}
+```
+
+I showed the string conversation above for int, and the implementation for floats is basically the same, there is just a maximum of `20` for the string buffer, and out right that is really the only difference, other than the C function parameters for type conversion. <br />
+
+The above function however is one of the more simple ways of conversion in the entire module. It is just a single line and in essence what it does is simple. You take the first argument (a float), and then you covert it from the Oli-Nat float value to the raw C float value, convert it using the C syntax, and then in the `CREATE_INT_VAL()` macro, you create whatever you are converting the float to.
+
+## doubleToX();
+
+Doubles work exactly like floats, just with more precision.
+
+```java
+#pullf types
+#pullf io
+
+make double d = 9.99;
+
+println(doubleToInt(d));    //9
+println(doubleToInt(-9.99)); //-9
+println(doubleToStr(d));    //9.990000
+println(doubleToFloat(d));  //9.990000f
+```
+
+Notice that `doubleToInt()` (and `floatToInt()`) always cut off the decimal instead of rounding, so `9.99` becomes `9`, and `-9.99` becomes `-9`. If you want to round instead, use `floor()` or `ceil()` from the [math library](https://olinat.net/docs/stdlib/math) first. <br />
+
+Also keep in mind that an `int` can only hold numbers up to about 2.1 billion, so converting a double bigger than that gives you a garbage value instead of an error.
+
+## strToX();
+
+Converting a string into a number is where most of the edge cases in this library live, because unlike the other conversions, a string can hold *anything*.
+
+```java
+#pullf types
+#pullf io
+
+make int age = strToInt("19");
+println(age + 1); //20
+
+println(strToDouble("3.5")); //3.500000
+println(strToFloat("2.5"));  //2.500000f
+println(strToInt("-7"));     //-7
+```
+
+These are really handy alongside `intake()` from the [IO library](https://olinat.net/docs/stdlib/io), since anything the user types comes in as a string:
+
+```java
+#pullf types
+#pullf io
+
+print("How old are you? ");
+make int age = strToInt(intake());
+println(age + 1);
+```
+
+The catch is that the **entire** string has to be a valid number of the type you are converting to. If it isn't, you get a runtime error and the program stops:
+
+| Call                  | Result                              |
+| --------------------- | ----------------------------------- |
+| `strToInt("42")`      | `42`                                |
+| `strToInt("42abc")`   | Error, has letters after the number |
+| `strToInt("4.5")`     | Error, an int can't have a decimal  |
+| `strToInt("")`        | Error, empty string                 |
+| `strToFloat("1.5f")`  | Error, don't include the `f`        |
+| `strToDouble("1e3")`  | `1000.000000`, scientific notation works |
+
+```
+:>>  TYPE ERROR -- Unable to turn given string into an int value.
+```
+
+### Under the Hood for strToX();
+
+```c
+Value strToIntNative(int argCount, Value* args, struct Vm* vm)
+{
+    char* str = AS_CSTRING(args[0]);
+    char* end;
+    errno = 0;
+    long result = strtol(str, &end, 10);
+    if (end == str || *end != '\0' || errno == ERANGE)
+    {
+        runtimeError(vm, "Unable to turn given string into an int value.", "TYPE ERROR");
+        return CREATE_EMPTY_VAL();
+    }
+    return CREATE_INT_VAL((int)result);
+}
+```
+
+All the work here is done by C's `strtol()` (and `strtod()` and `strtof()` for doubles and floats). It reads as much of the string as it can as a number, and sets `end` to point at wherever it stopped. That makes checking for bad input pretty easy: if `end` never moved, there was no number at all, if `end` isn't sitting on the `\0` at the end of the string, there was junk after the number, and if `errno` is `ERANGE`, the number was too big to fit.
+
+## Booleans
+
+Booleans only have two conversions, `boolToStr()` and `strToBool()`, and they are as simple as they sound.
+
+```java
+#pullf types
+#pullf io
+
+println(boolToStr(true));    //true
+println(strToBool("false")); //false
+```
+
+`strToBool()` is strict: only the exact strings `"true"` and `"false"` work. Anything else, even `"True"` or `"1"`, is a runtime error:
+
+```
+:>>  TYPE ERROR -- Cannot convert string to bool: expected 'true' or 'false'.
+```
+
+## Function Reference
+
+| Function          | Parameter | Returns  | Notes                                     |
+| ----------------- | --------- | -------- | ----------------------------------------- |
+| `intToStr()`      | `int`     | `string` |                                           |
+| `intToDouble()`   | `int`     | `double` |                                           |
+| `intToFloat()`    | `int`     | `float`  |                                           |
+| `floatToStr()`    | `float`   | `string` | No `f` in the string                      |
+| `floatToInt()`    | `float`   | `int`    | Cuts off the decimal                      |
+| `floatToDouble()` | `float`   | `double` |                                           |
+| `doubleToStr()`   | `double`  | `string` | Always 6 decimal places                   |
+| `doubleToInt()`   | `double`  | `int`    | Cuts off the decimal                      |
+| `doubleToFloat()` | `double`  | `float`  | May lose precision                        |
+| `strToInt()`      | `string`  | `int`    | Runtime error if not a whole number       |
+| `strToDouble()`   | `string`  | `double` | Runtime error if not a number             |
+| `strToFloat()`    | `string`  | `float`  | Runtime error if not a number             |
+| `strToBool()`     | `string`  | `bool`   | Only `"true"` or `"false"`                |
+| `boolToStr()`     | `bool`    | `string` |                                           |

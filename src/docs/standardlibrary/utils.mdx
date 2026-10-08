@@ -1,0 +1,137 @@
+# Utils
+
+The utils library is the smallest library in Oli-Nat, and is where the small, general purpose helper functions live that don't really fit anywhere else. Right now it only has two functions, `length()` and `assert()`, but both of them get used constantly. <br />
+
+`length()` is what makes looping over arrays possible, and `assert()` is what every test program in the [interpreter's `testCases/` folder](https://github.com/NateTheGrappler/OliNat-Programming-Language/tree/main/testCases) uses to check that the language is behaving correctly. <br />
+
+At the very bottom of this page is a table with both functions, their parameters, and their return types.
+
+## length();
+
+This function takes in a single array of any type, and returns an `int` of how many elements are inside of it.
+
+```java
+#pullf utils
+#pullf io
+
+make int[] nums = [3, 1, 4, 1, 5];
+println(length(nums)); //5
+
+make string[] words = ["oli", "nat"];
+println(length(words)); //2
+```
+
+The most common place you will see `length()` is inside of a `for` loop, so you can walk through every element of an array without having to hard code its size:
+
+```java
+#pullf utils
+#pullf io
+
+make int[] scores = [10, 20, 30];
+make int total = 0;
+
+for (make int i = 0; i < length(scores); i++)
+{
+    total += scores[i];
+}
+println(total); //60
+```
+
+Arrays in Oli-Nat are a fixed size, so the length of an array never changes after it is created. <br />
+
+Also keep in mind that `length()` only works on arrays. Passing it a string is a type error, caught before your program runs. To get the length of a string, use `strLength()` from the [String library](https://olinat.net/docs/stdlib/strings) instead.
+
+```
+:>>  | TYPE ERROR | at line 3: Please input an array as an arguement into this function.]
+```
+
+### Under the Hood for lengthNative();
+
+```c
+Value lengthNative(int argCount, Value* args, struct Vm* vm)
+{
+    ObjStaticArray* array = (ObjStaticArray*)GET_OBJECT_VAL(args[0]);
+    return CREATE_INT_VAL(array->length);
+}
+```
+
+This is about as simple as a native function gets. Every array in Oli-Nat is an `ObjStaticArray` on the heap, and it already keeps track of its own length, so all we have to do is cast the argument to an array and hand that length back as an Oli-Nat `int`. <br />
+
+You might notice there is no check that the argument is actually an array. That's because the type checker already guarantees it before the program ever runs, so by the time this function is called, it can't be anything else.
+
+## assert();
+
+This function takes in a `bool`, and if that `bool` is `false`, it stops your program with an error. If it's `true`, nothing happens and your program keeps going.
+
+```java
+#pullf utils
+#pullf io
+
+assert(1 + 1 == 2);
+println("passed"); //passed
+
+assert(1 + 1 == 3);
+println("never printed");
+```
+
+```
+:>>  ASSERTION ERROR -- Assertion Failed.
+```
+
+You can also pass in an optional second parameter, a `string` message, which gets printed instead of the default one. This makes it much easier to tell *which* assert failed when you have a lot of them:
+
+```java
+#pullf utils
+#pullf io
+
+make empty withdraw(int balance, int amount)
+{
+    assert(amount <= balance, "cannot withdraw more than the balance");
+    println(balance - amount);
+}
+
+withdraw(100, 30);  //70
+withdraw(100, 500); //assertion error
+```
+
+```
+:>>  ASSERTION ERROR -- cannot withdraw more than the balance
+Stack trace:
+  [line 6] in withdraw()
+  [line 11] in <script>()
+```
+
+The two main uses for `assert()` are writing tests, where you check that something gives the result you expect, and guarding against things that should *never* happen in your program, like a negative balance or an index out of range. Since a failed assert is a runtime error, the interpreter also exits with a non-zero exit code, which makes it easy for scripts to tell whether a test passed or failed.
+
+### Under the Hood for assertNative();
+
+```c
+Value assertNative(int argCount, Value* args, struct Vm* vm)
+{
+    if (!GET_BOOL_VAL(args[0]))
+    {
+        if (argCount == 2)
+        {
+            char* message = AS_CSTRING(args[1]);
+            runtimeError(vm, message, "ASSERTION ERROR");
+        }
+        else
+        {
+            runtimeError(vm, "Assertion Failed.", "ASSERTION ERROR");
+        }
+        return  CREATE_EMPTY_VAL();
+    }
+    return CREATE_EMPTY_VAL();
+}
+```
+
+`assert()` is one of the only native functions in the standard library with an *optional* parameter (the other being `intake()`), which is why it checks `argCount`. If the user passed two arguments, we use their message, and otherwise we fall back on the default `"Assertion Failed."`. <br />
+
+Either way, the actual stopping of the program is handled by `runtimeError()`, the same function every other runtime error in the VM goes through. It prints the message and the stack trace, and flags that an error happened, so the VM stops as soon as the native function returns.
+
+## Function Reference
+
+| Function   | Parameters                        | Returns | Notes                                      |
+| ---------- | --------------------------------- | ------- | ------------------------------------------ |
+| `length()` | any array                         | `int`   | Arrays only, use `strLength()` for strings |
+| `assert()` | `bool`, optional `string` message | `empty` | Stops the program if the `bool` is `false` |

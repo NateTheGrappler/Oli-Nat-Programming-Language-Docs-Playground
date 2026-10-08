@@ -1,0 +1,342 @@
+# String Manipulation
+
+Strings in Oli-Nat are fairly strange, in order to be optimized, they are hashed at their creation, and then stored in a global hashmap which allows for there to both not be duplicates of strings inside the VM as well as almost O(1) string comparison. <br />
+
+Nerdy bits aside, this means strings are not too malleable in the base language, and so this library aims to change just that. In the base language you can only concatenate strings using the `+` operator. This library instead allows you to do things like:
+
+- Find the string length
+- Slice different string indexes
+- Manipulate lower or upper string values
+- Outright replace portions of a string
+- Reverse a string
+
+This covers a lot of the string functionality, and it does leave a bit to be desired, like say string indexing and what not, but it does make actually manipulating and dealing with strings a whole lot easier. <br />
+
+## strLength();
+
+`strLength()` takes in just a single argument, the string whose length you want to find out. This is similar to the [length() function for arrays](https://olinat.net/docs/stdlib/utils), and returns an `int` representing the size of a string in characters. <br />
+
+At the moment of writing, string indexing is not a thing in Oli-Nat, and so this is not often times used like how you would use `length()` for an array, and can instead be good to do comparisons of a string if you would like.
+
+```java
+#pullf String
+
+make string x = "123";
+make string y = "4567";
+
+if(strLength(x) > strLength(y))
+{
+	//do something
+}
+```
+
+Generally this is a bit of a mixed bag. This function was initially proposed with the idea in mind that string indexing will eventually be added, and then it will get a lot more use, but for the time being given that base string comparison of `x == y` is O(1) in Oli-Nat, it is the more recommended option for checking if two strings are the same. <br />
+
+Where `strLength()` really shines right now is alongside `strSlice()` further down this page, since it tells you where the end of the string is. <br />
+
+One small thing to know is that `strLength()` counts *bytes*, not letters. For normal English text those are the same thing, but accented letters and emoji take up more than one byte, so `strLength("héllo")` is `6`, not `5`.
+
+### Under the hood for strLength();
+
+```c
+Value strLength(int argCount, Value* args, struct Vm* vm)
+{
+    return CREATE_INT_VAL(((ObjString*)GET_OBJECT_VAL(args[0]))->length);
+}
+```
+
+String objects in Oli-Nat hold a large amount of information about them because of how complex the idea of a string is in nature to a standard numeric value. Basically, they hold a pointer to an array of the actual C representation of a string, which means they need to be able to actually hold the `length` value in order to know how to traverse that char array.
+
+This is actually very beneficial in this case, because it means we can simply nab that value right out of the `ObjString` struct and convert it into an integer value we just return outright.
+
+## strContains();
+
+This function is used to see if a given string contains the same letters as a second substring that was put in. It takes in two arguments, a `haystack` which is the original string, and a `needle` which is the string that we are searching for. It compares the two and then returns a boolean value to see if the needle is in the haystack.
+
+```java
+#pullf io
+#pullf String
+
+make string username = intake("Please type in Username: ");
+make string password = intake("Please type in Password: ");
+
+if(strContains(password, username))
+{
+	println("Your password cannot contain your username");
+}
+else
+{
+	println("Valid username and password ");
+}
+
+```
+
+As can be seen, this can be really useful if you want to have specifications on if a string contains another string. It can help you understand if a file has a word or sentence that you might be looking for. Instead of looking through millions of text file lines, you can make a quick script to tell you that the value exists in there. <br />
+
+Note however that the `strContains()` function returns a boolean value, this means it can check if a substring exists, but is not able to tell you directly where it is actually found. <br />
+
+It is also case-sensitive, so `strContains("Hello", "hello")` is `false`. If you want to ignore case, convert both strings with `strToLower()` first.
+
+### Under the hood for strContains
+
+```c
+Value strContains(int argCount, Value* args, struct Vm* vm)
+{
+    ObjString* haystack = AS_STRING(args[0]);
+    ObjString* needle = AS_STRING(args[1]);
+
+    bool found = strstr(haystack->chars, needle->chars) != NULL;
+    return CREATE_BOOL_VAL(found);
+
+}
+```
+
+Things here are once again very simple, we get the needle and the haystack values from the arguments that the user passed in, and then we pass off the responsibility of telling if a string exists inwardly or not over to a C function. <br />
+
+Based on what we find, we simply create a new boolean value and then return that for the VM to continue processing.
+
+## strSlice();
+
+This one is a fun one. It is basically why you can accomplish basically the same things in Oli-Nat that you can in languages that do allow string indexing. The `strSlice()` command allows you to put in a string, a starting index, and an ending index, and then *returns the character values corresponding to what is between those indexes*. The start index is included, but the end index is not, so `strSlice("hello", 0, 1)` gives you just `"h"`.
+
+```java
+#pullf String
+#pullf io
+
+make string msg = "VM's are so Cool!";
+make string indexedMsg = strSlice(msg, 9, strLength(msg));
+
+println(indexedMsg); //so Cool!
+```
+
+The `strSlice()` function as seen, can be used to pick out a specific portion of a string and create a new string out of it. It is also where something like `strLength()` can also become useful for finding out what the end of a string is without actually counting. <br />
+
+There are a few rules for this of course, for example, you cannot do something like have flipped indexes, so `strSlice(msg, 8, 6)` or `strSlice(msg, -8, 32)` both cause a runtime error. Generally you have to treat the string as an array of characters with how you would index it, so we start at `0` and then end at `strLength()` or whatever the size of the string is. <br />
+
+This is also how you get a single character out of a string, since strings can't be indexed with `[]` like arrays can. `strSlice(msg, i, i + 1)` gives you the character at index `i`.
+
+### Under the Hood for strSlice()
+```c
+Value strSlice(int argCount, Value* args, struct Vm* vm)
+{
+    ObjString* original = AS_STRING(args[0]);
+    int start = GET_INT_VAL(args[1]);
+    int end = GET_INT_VAL(args[2]);
+
+    if (start < 0 || end > original->length || start > end)
+    {
+        runtimeError(vm, "Slice indices are wayyyy out of bounds, cant do it.", "INDEX ERROR");
+        return CREATE_EMPTY_VAL();
+    }
+
+    int newLength = end - start;
+    char* buffer = ALLOCATE(char, newLength+1, vm);
+    memcpy(buffer, original->chars + start, newLength);
+    buffer[newLength] = '\0';
+
+    ObjString* returnString = copyString(buffer, (int)strlen(buffer), vm);
+    FREE_ARRAY(char, buffer, newLength+1, vm)
+    return CREATE_OBJECT_VAL((Obj*)returnString);
+}
+```
+
+This one looks pretty gnarly but is actually not all that bad in practice. We start out with getting all of the parameters that the user passed in and converting them to something that we can use. <br />
+
+Right before doing anything, we check the indexes that the user passed in with respect to the actual stored length value of the string in the `ObjString` struct, this means that if there is an indexing error, the VM can handle it instead of letting a segmentation fault crash the whole program. <br  />
+
+After we know we are all good though, we simply allocate a new char buffer at the new size of the string, and then use `memcpy` to copy over the character values from the one string buffer to the other. At which point we intern the string in the VM, get rid of the memory we borrowed for making the string, and then return the new string object we just made.
+
+## strToUpper(); & strToLower();
+
+These two are mirror images of each other, so they get to share a section. Both take in a single string, and return a new copy of it with every letter changed to uppercase or lowercase. Anything that isn't a letter, like numbers, spaces, and punctuation, is left alone.
+
+```java
+#pullf String
+#pullf io
+
+make string greeting = "Hello, World 123!";
+
+println(strToUpper(greeting)); //HELLO, WORLD 123!
+println(strToLower(greeting)); //hello, world 123!
+```
+
+The most common use for these is making comparisons that don't care about capitalization. If a user types in `"YES"`, `"Yes"`, or `"yes"`, converting it to lowercase first means you only have to check for one of them:
+
+```java
+#pullf String
+#pullf io
+
+make string answer = intake("Play again? ");
+
+if (strToLower(answer) == "yes")
+{
+    println("Here we go!");
+}
+```
+
+Note that these functions don't change the original string, they give you back a new one. Strings in Oli-Nat can never be changed once they're created, so `strToUpper(greeting)` on its own does nothing unless you store or use the result. <br />
+
+They also only work on plain English letters, so accented letters like the `é` in `"café"` stay exactly as they are.
+
+### Under the Hood for strToUpper(); & strToLower();
+
+```c
+Value strToUpper(int argCount, Value* args, struct Vm* vm)
+{
+    ObjString* original = AS_STRING(args[0]);
+    int length = original->length;
+
+    char* buffer = ALLOCATE(char, length + 1, vm);
+    for (int i = 0; i < length; i++)
+    {
+        buffer[i] = toupper((unsigned char)original->chars[i]);
+    }
+    buffer[length] = '\0';
+
+    ObjString* returnString = copyString(buffer, (int)strlen(buffer), vm);
+    FREE_ARRAY(char, buffer, length+1, vm)
+    return CREATE_OBJECT_VAL((Obj*)returnString);
+}
+```
+
+`strToLower()` is the exact same function, just with `tolower()` in place of `toupper()`. <br />
+
+Since we can't change the original string (it's interned, and other parts of the program might be using it), we allocate a fresh buffer the same size as the original. Then we walk through it one character at a time, running each one through C's `toupper()`, which turns lowercase letters into uppercase and leaves everything else alone. After that it's the same routine as `strSlice()`: intern the new string, free the buffer, and return it. <br />
+
+The `(unsigned char)` cast is there because `toupper()` technically only accepts values from 0 to 255, and without it, some characters could be passed in as negative numbers, which is undefined behavior in C.
+
+## strReplace();
+
+This function takes in three strings: the original string, the target you want to find, and the replacement you want to put in its place. It returns a new string with the target swapped out for the replacement.
+
+```java
+#pullf String
+#pullf io
+
+make string sentence = "I like cats";
+println(strReplace(sentence, "cats", "dogs")); //I like dogs
+```
+
+Replacing something with an empty string `""` is also a handy way of deleting part of a string:
+
+```java
+println(strReplace("hello world", " world", "")); //hello
+```
+
+There are two things to watch out for with this one. First, it only replaces the **first** match it finds, not every match:
+
+```java
+println(strReplace("cats and cats", "cats", "dogs")); //dogs and cats
+```
+
+And second, if the target isn't in the string at all, you get a runtime error, so if you aren't sure the target is there, check with `strContains()` first:
+
+```
+:>>  LOGIC ERROR -- Unable to find target string to replace in original string.
+```
+
+### Under the Hood for strReplace();
+
+```c
+Value strReplace(int argCount, Value* args, struct Vm* vm)
+{
+    //get the stuff from args
+    ObjString* original = AS_STRING(args[0]);
+    ObjString* target = AS_STRING(args[1]);
+    ObjString* replacement = AS_STRING(args[2]);
+
+    //find replacement in original string
+    char* foundString = strstr(original->chars, target->chars);
+    if (foundString == NULL)
+    {
+        runtimeError(vm, "Unable to find target string to replace in original string.", "LOGIC ERROR");
+        return CREATE_EMPTY_VAL();
+    }
+
+    //calc the lengths
+    int beforeLength = (int)(foundString - original->chars);
+    int afterLength  = original->length - beforeLength - target->length;
+    int newLength    = beforeLength + replacement->length + afterLength;
+
+    //build new string
+    char* buffer = ALLOCATE(char, newLength+1, vm);
+    memcpy(buffer, original->chars, beforeLength);
+    memcpy(buffer + beforeLength, replacement->chars, replacement->length);
+    memcpy(buffer+beforeLength+replacement->length, foundString+target->length, afterLength);
+    buffer[newLength] = '\0';
+
+    ObjString* returnString = copyString(buffer, newLength, vm);
+    FREE_ARRAY(char, buffer, newLength+1, vm)
+    return CREATE_OBJECT_VAL((Obj*)returnString);
+}
+```
+
+This is the biggest function in the library, but it's really just three steps. First, it uses `strstr()` (the same C function behind `strContains()`) to find where the target starts. `strstr()` only ever finds the first match, which is why only the first one gets replaced. <br />
+
+Next, it splits the original string into three pieces: everything *before* the target, the target itself, and everything *after* it. Subtracting the two pointers gives the length of the "before" part, and the "after" part is whatever is left over. <br />
+
+Finally, it builds the new string with three `memcpy()` calls: the "before" part, then the replacement, then the "after" part, skipping over the target entirely. Then, like every other function here, it interns the result and frees the buffer.
+
+## strReverse();
+
+This function takes in a single string and returns it backwards.
+
+```java
+#pullf String
+#pullf io
+
+println(strReverse("Oli-Nat")); //taN-ilO
+```
+
+This was added to Oli-Nat by [Mohammed Al-Shugaa](https://github.com/MXD-K1), who also built the [random library](https://olinat.net/docs/stdlib/random). Thank you, Mohammed! <br />
+
+The classic use for it is checking for palindromes, words that read the same forwards and backwards:
+
+```java
+#pullf String
+#pullf io
+
+make string word = "racecar";
+
+if (strReverse(word) == word)
+{
+    println(word + " is a palindrome!");
+}
+```
+
+Just like the case functions, `strReverse()` works one byte at a time, so it's meant for plain English text. Reversing a string with accented letters or emoji will scramble those characters.
+
+### Under the Hood for strReverse();
+
+```c
+Value strReverse(int argCount, Value* args, struct Vm* vm)
+{
+    ObjString* original = AS_STRING(args[0]);
+    int length = original->length;
+
+    char* buffer = ALLOCATE(char, length + 1, vm);
+    for (int i = 0; i < length; i++)
+    {
+        buffer[length - i - 1] = original->chars[i];
+    }
+    buffer[length] = '\0';
+
+    ObjString* returnString = copyString(buffer, (int)strlen(buffer), vm);
+    FREE_ARRAY(char, buffer, length+1, vm)
+    return CREATE_OBJECT_VAL((Obj*)returnString);
+}
+```
+
+This follows the same pattern as `strToUpper()`, with the only difference being *where* each character goes. Instead of copying character `i` into spot `i`, it copies it into spot `length - i - 1`, so the first character lands in the last spot, the second in the second to last, and so on.
+
+## Function Reference
+
+| Function        | Parameters                                               | Returns  | Notes                                                   |
+| --------------- | -------------------------------------------------------- | -------- | ------------------------------------------------------- |
+| `strLength()`   | `string`                                                 | `int`    | Counts bytes, not letters                               |
+| `strContains()` | `string` haystack, `string` needle                       | `bool`   | Case-sensitive                                          |
+| `strSlice()`    | `string`, `int` start, `int` end                         | `string` | Start included, end not; runtime error if out of bounds |
+| `strToUpper()`  | `string`                                                 | `string` | Only changes English letters                            |
+| `strToLower()`  | `string`                                                 | `string` | Only changes English letters                            |
+| `strReplace()`  | `string` original, `string` target, `string` replacement | `string` | First match only; runtime error if not found            |
+| `strReverse()`  | `string`                                                 | `string` |                                                         |

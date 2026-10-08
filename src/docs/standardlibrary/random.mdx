@@ -1,0 +1,155 @@
+
+# Random
+
+The random library gives Oli-Nat the ability to generate random numbers. That might sound small, but it's what makes things like dice rolls, coin flips, shuffled games, and simulations possible. It has three functions: `random()`, `randint()`, and `seed()`. <br />
+
+This library is also special because **I didn't write it!** It was built entirely by contributors to the language, which makes it the first library in Oli-Nat to come from the community! <br />
+
+## Credits
+
+A huge thank you to the two people who made this library:
+
+- [**Enmanuel "Manny" Rodriguez**](https://github.com/Mxvnnyy) wrote Oli-Nat's very first random number generator, the original `rand()` function, which is where this whole library started.
+- [**Mohammed Al-Shugaa**](https://github.com/MXD-K1) took that and expanded it into the full library you see here. He added `random()` and `seed()`, turned the original `rand()` into `randint()`, split it all out into its own `#pullf random` library, and wrote the [test program](https://github.com/NateTheGrappler/OliNat-Programming-Language/blob/main/testCases/Stdlib/random.oli) for it.
+
+If you'd like to see your name on a page like this one, see [Ways to Contribute](https://olinat.net/docs/contributing/how-to-help).
+
+## random();
+
+This function takes in no parameters, and returns a random `float` between `0` and `1`.
+
+```java
+#pullf random
+#pullf io
+
+println(random()); //0.132097f
+println(random()); //0.666514f
+```
+
+On its own a number between 0 and 1 might not seem very useful, but it's perfect for anything based on a *chance*. For example, a coin flip is just checking whether the number is below one half:
+
+```java
+#pullf random
+#pullf io
+
+if (random() < 0.5f)
+{
+    println("heads");
+}
+else
+{
+    println("tails");
+}
+```
+
+Change the `0.5f` to `0.1f` and you have something that happens 10% of the time, like a critical hit in a game. <br />
+
+Keep in mind that `random()` returns a `float`, not a `double`, so you need to store it in a `float` variable, or convert it with `floatToDouble()` from the [types library](https://olinat.net/docs/stdlib/types).
+
+### Under the Hood for randomNative();
+
+```c
+Value randomNative(int argCount, Value* args, struct Vm* vm)
+{
+    return CREATE_FLOAT_VAL((double)rand() / RAND_MAX);
+}
+```
+
+This uses C's built in `rand()` function, which returns a random whole number between `0` and `RAND_MAX`, the biggest number `rand()` can give back. Dividing by `RAND_MAX` squishes that down into the range `0` to `1`, and then it's wrapped up as an Oli-Nat `float`. Since `rand()` can return exactly `RAND_MAX`, the result can technically be exactly `1`, though it's very rare.
+
+## randint();
+
+This function takes in two `int` parameters, a minimum and a maximum, and returns a random `int` between them. Both ends are included, so `randint(1, 6)` can give back any of `1`, `2`, `3`, `4`, `5`, or `6`.
+
+```java
+#pullf random
+#pullf io
+
+make int roll = randint(1, 6);
+println(roll); //5
+```
+
+This is the most commonly used one, at least in my experience, since a lot of randomness in programs comes down to "pick a number in this range". Rolling dice, picking a random index from an array, and spawning something at a random position all use it:
+
+```java
+#pullf random
+#pullf utils
+#pullf io
+
+make string[] fruits = ["apple", "banana", "cherry"];
+make int pick = randint(0, length(fruits) - 1);
+println(fruits[pick]); //banana
+```
+
+Negative numbers work fine too, so `randint(-3, 3)` gives back anything from `-3` to `3`. <br />
+
+The one thing to watch out for is making sure the minimum is actually less than or equal to the maximum. If they're the wrong way around, like `randint(5, 1)`, you'll get numbers outside the range you asked for, and in some cases it can even crash the interpreter. This is a known issue, and checking for it would make a [great first contribution!](https://olinat.net/docs/contributing/getting-started)
+
+### Under the Hood for randintNative();
+
+```c
+Value randintNative(int argCount, Value* args, struct Vm* vm)
+{
+    if(IS_INT(args[0]) && IS_INT(args[1]))
+    {
+        int min = GET_INT_VAL(args[0]); 
+        int max = GET_INT_VAL(args[1]); 
+
+        int randNum = (rand() % (max - min +1)) + min; 
+        
+        return CREATE_INT_VAL(randNum); 
+
+    }
+
+    return CREATE_EMPTY_VAL(); 
+}
+```
+
+This uses a classic trick for getting a random number in a range. `max - min + 1` is how many possible numbers there are (6 for a die), and the `%` (modulo) operator takes `rand()`'s huge random number and turns it into the remainder after dividing by that count, which is always between `0` and `5`. Adding `min` then shifts it up into the range you asked for, so `0` to `5` becomes `1` to `6`.
+
+## seed();
+
+This function takes in a single `int`, and returns nothing. It sets the *seed* of the random number generator, which decides the sequence of random numbers you'll get.
+
+```java
+#pullf random
+#pullf io
+
+seed(42);
+println(randint(1, 100)); //67
+println(randint(1, 100)); //41
+
+seed(42);
+println(randint(1, 100)); //67 again
+println(randint(1, 100)); //41 again
+```
+
+Computers can't actually make truly random numbers. Instead, they use a formula that produces a sequence of numbers that *look* random, starting from a number called the seed. The same seed always produces the same sequence, which is exactly what you see above. <br />
+
+That might sound like the opposite of what you want, but it's really useful. If you're testing a game and a bug only shows up on certain random rolls, seeding the generator with the same number every time lets you reproduce the bug exactly. Tests that use random numbers can also seed first, so they get the same result every run. <br />
+
+You don't need to call `seed()` for normal use. When you `#pullf random`, the library automatically seeds itself from the current time, so you get different numbers every time you run your program. <br />
+
+Also note that the same seed can give a different sequence on a different operating system, since Windows, Linux, and macOS each have their own version of C's `rand()`. A seed will be repeatable on *your* machine, but don't count on it matching someone else's.
+
+### Under the Hood for seedNative();
+
+```c
+Value seedNative(int argCount, Value* args, struct Vm* vm)
+{
+    if(IS_INT(args[0])) srand(GET_INT_VAL(args[0]));
+    return CREATE_EMPTY_VAL();
+}
+```
+
+This one is a direct wrapper around C's `srand()` function, which sets the seed for `rand()`. Since both `random()` and `randint()` use `rand()` under the hood, calling `seed()` affects both of them. <br />
+
+The automatic seeding mentioned above happens when the library is first registered with the VM, in `registerRandomNatives()`, with a single call to `srand(time(NULL))`. `time(NULL)` is the number of seconds since 1970, so it's different every time you run your program.
+
+## Function Reference
+
+| Function    | Parameters           | Returns | Notes                                        |
+| ----------- | -------------------- | ------- | -------------------------------------------- |
+| `random()`  | none                 | `float` | Between `0` and `1`                          |
+| `randint()` | `int` min, `int` max | `int`   | Both ends included, min must be ≤ max        |
+| `seed()`    | `int`                | `empty` | Same seed gives the same sequence of numbers |
