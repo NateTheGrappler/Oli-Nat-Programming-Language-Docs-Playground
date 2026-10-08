@@ -1,0 +1,96 @@
+
+# Defining a Class
+
+Classes in Oli-Nat are a vital component for writing code. While not outright a class-based language, at least not entirely like Java, Oli-Nat does support classes and all of the fun and amazing features that they add to programming.
+
+To define a class in Oli-Nat you first use the `class` keyword:
+
+```java
+class gameEngine
+{
+	//empty class
+}
+```
+
+Class declarations are very simple in practice, in fact the above hand code is entirely valid Oli-Nat code, you can declare a function just like that with no inherent constructor, methods, or fields. Although I do not really know why you would want to do so. <br />
+
+Classes follow the structure of the `class` keyword followed by the identifier or the class name. Following this you can either have an [inheriting class](https://olinat.net/docs/guides/instances), or a block statement that would define the body of your function. <br />
+
+Classes are also pretty strict about what goes inside of them, and that can only be **fields** or **methods**, meaning that things like other classes or control flow statements are invalid Oli-Nat syntax and will throw an error:
+
+```java
+class Player
+{
+    class Pet
+    {
+	    //SYNTAX ERROR -- [line  a3t '}': Please only include either field or method declarations inside of a class declaration body.]
+    }
+    
+    for(;;)
+    {
+	    //SYNTAX ERROR -- [line 8 at '{': Please only include either field or method declarations inside of a class declaration body.]
+    }
+}
+
+```
+
+# Class Fields
+
+Fields in classes are basically variables that can describe the state of a function. My very first programming language that I really bit my teeth into was C++, and I made a [custom game engine](https://github.com/NateTheGrappler/Galatic_Inc_Alpha). This was obviously very class based, and I grew to love how C++ classes worked, and so I wanted to have Oli-Nat have classes similar to that of C++. <br />
+
+This means that classes only hold the state that their definitions define, meaning that you cannot add state to a class instance, but only change it. This generally is nice in the language hacker side because we can know the exact size of each class while we are compiling it. <br />
+
+Jargon aside, **class fields** are variables that a function can store, and they are defined in the same way that you would any other variable, but just inside of the class scope.
+
+```java
+class gameEngine
+{
+	make int frameCount = 0;
+	make string currentLevelName = "Galactic Inc";
+}
+```
+
+Fields inside of a class definition still must follow the same rules that they would if they were outside of the class scope. This means that they must include the `make` keyword, as well as the type of the variable. The only difference being that you can declare a variable without an initialized value. Variables may be either **basic values** or **complex values**:
+
+```java
+class Scene
+{
+	//can have arrays as fields
+	make int[] blockPosition = [1, 2, 3, 4];
+	make int x; //given a starting value of 0
+}
+
+class gameEngine
+{
+	//can have other class instances as fields as well
+	make Scene bossRoom = Scene();
+}
+```
+
+As you can see, you can have complex objects like arrays or even other class instances as a field inside of a class. Fields in general contain state, and even though they do need to be declared with an initial value, they do not have to stay that way, and you can easily change them, see [instances & calling](https://olinat.net/docs/guides/instances) <br />
+
+Overall, fields are a very important part of classes, and are going to the things that actually let you **store state** inside of your class instances. You cannot add new fields to an existing instance, so make sure that all of your fields are defined in the class definition, following the proper guidelines.
+
+# Class Methods
+
+Class methods are basically functions that are defined inside of the class that let the class manage and change it's own state based on the behavior that you would define. These are very useful for things like performing actions with classes. <br />
+
+Class methods are defined in the exact same way as a [regular function definition](https://olinat.net/docs/guides/functions) is, except that it is done inside of a class content of course.
+
+```java
+class Scene
+{
+	make bool isLoaded = false;
+	
+	make empty loadScene(bool loadScene)
+	{
+		this.isLoaded = loadScene;
+	}
+}
+```
+
+The class encompasses that definition, and every single function defined inside of the class' body becomes one of those functions methods. These methods are defined just like functions, with a make keyword, the return type of the method, and then whatever parameters that the method can take in. <br />
+
+The special thing about these methods is of course that they can alter the state of the class itself, [this](https://olinat.net/docs/guides/instances) is went into greater detail inside of the inheritance notes, but using the `this` keyword, you can access the inner state of your class in a method in order to modify it. <br />
+
+Classes themselves hold state in the idea of instances, and each bit of this state is ***stored*** in the fields, but the methods is what you use to actually ***change/manipulate*** those fields.
