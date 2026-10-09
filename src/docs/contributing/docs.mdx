@@ -1,0 +1,148 @@
+# Contribute to the Docs
+
+This website is open source too, and it lives in its own [repository](https://github.com/NateTheGrappler/Oli-Nat-Programming-Language-Docs-Playground), separate from the language itself. There are two main ways to help out with it: **writing and fixing documentation**, which only needs Markdown, and **working on the site itself**, which is a React and TypeScript project. <br />
+
+You don't need to know anything about compilers or C for either one. If you can write a Markdown file, you can contribute to the docs.
+
+## Small Fixes, No Setup Needed
+
+If you spot a typo, a broken link, or an explanation that doesn't make sense, you don't even need to download the project to fix it. GitHub lets you edit files right in your browser:
+
+1. Find the page's file in the repository under `src/docs/` (see **Where the Docs Live** below).
+2. Click the pencil icon in the top right of the file to edit it. GitHub will automatically fork the repository for you.
+3. Make your change, describe it briefly, and click **Propose changes**, then **Create pull request**.
+
+That's it! For anything bigger than a quick fix, like writing a new page, you'll want to run the site on your own computer so you can see your changes as you make them.
+
+## Running the Site Locally
+
+Follow the steps in [Local Setup](https://olinat.net/docs/contributing/getting-started) to fork and clone the docs repository, then run:
+
+```bash
+npm install
+npm run dev
+```
+
+The site will be running at `http://localhost:5173`, and it reloads automatically every time you save a file, so you can keep the page open in your browser while you write.
+
+## Where the Docs Live
+
+Every page on this site is a single `.mdx` file inside of `src/docs/`, sorted into a folder for each section:
+
+| Folder                       | Section on the site | URL                   |
+| ---------------------------- | ------------------- | --------------------- |
+| `src/docs/introduction/`     | Introduction        | `/docs/...`           |
+| `src/docs/guides/`           | Guides              | `/docs/guides/...`    |
+| `src/docs/standardlibrary/`  | Standard Library    | `/docs/stdlib/...`    |
+| `src/docs/contributing/`     | Contributing        | `/docs/contributing/...` |
+
+The file name is the last part of the page's URL. For example, `src/docs/guides/arrays.mdx` is the page at [/docs/guides/arrays](https://olinat.net/docs/guides/arrays). So if you're on a page you want to fix, the URL tells you exactly which file to open.
+
+## Adding a New Page
+
+Adding a page takes two steps. First, create the `.mdx` file in the right section's folder, for example `src/docs/guides/strings.mdx`. <br />
+
+Second, add an entry for it to that section's `pages` list in `src/config/sections.ts`:
+
+```ts
+{ slug: 'strings', title: 'Strings' },
+```
+
+The `slug` has to match the file name **exactly**, including capital letters, or the page won't load. The `title` is what shows up in the sidebar. <br />
+
+The order of the entries in `sections.ts` is the order the pages appear in the sidebar, and also decides where the **Next** and **Previous** links at the bottom of each page go, so place your page where it makes sense for someone reading through the docs in order. You don't have to set up those links yourself, they're worked out automatically. <br />
+
+If you want to group a few pages together under a dropdown in the sidebar, like the Classes pages, put them in a `children` list:
+
+```ts
+{ slug: 'classes', title: 'Classes', children: [
+    { slug: 'constructors', title: 'Constructors' },
+    { slug: 'instances', title: 'Class Instances' },
+]},
+```
+
+The parent entry is only a label for the dropdown, so it doesn't need its own `.mdx` file.
+
+## Writing a Page
+
+MDX is just Markdown, with the option of using a bit of React inside of it when you need to. For almost every page, plain Markdown is all you need: headings, paragraphs, lists, links, and tables all work exactly the way you'd expect.
+
+### Code Blocks
+
+Use fenced code blocks for code. Oli-Nat doesn't have its own syntax highlighting yet, so Oli-Nat code uses `java`, which highlights it pretty closely:
+
+````md
+```java
+#pullf io
+
+make int x = 5;
+println(x); //5
+```
+````
+
+For terminal output and error messages, use a plain code block with no language, so they don't get highlighted as code:
+
+````md
+```
+:>>  | TYPE ERROR | at line 4: Undefined field.]
+```
+````
+
+### Images
+
+To add an image, put the file in `src/assets/Images/`, import it at the very top of your `.mdx` file, and then use an `<img>` tag. The `banner` class makes it fit the width of the page nicely:
+
+```jsx
+import myDiagram from '../../assets/Images/myDiagram.png'
+
+<img src={myDiagram} alt="A diagram of the VM stack" className="banner" />
+```
+
+Always include `alt` text describing the image, for anyone using a screen reader.
+
+## Style Guidelines
+
+The docs aren't meant to read like a textbook. Feel free to write casually and in your own voice, the same way you'd explain something to a friend. A few things do matter though:
+
+- **Test every example.** Run each code example in the [playground](https://olinat.net/playground) or the native interpreter before you add it, and make sure the output in your comments is what it *actually* prints. Wrong examples are the most common docs bug there is.
+- **Copy error messages, don't retype them.** If you're showing an error, run the code and paste the real message.
+- **Include the `#pullf` lines.** If an example uses `println` or any other standard library function, include the `#pullf` lines it needs, so readers can copy it straight into the playground and run it.
+- **Show what it prints.** Put the expected output in a `//` comment next to the line that prints it.
+- **Mention the edge cases.** What happens with a negative number, an empty string, or a missing file is often the most useful part of a page.
+- **For standard library pages**, follow the same layout as the existing ones: a short introduction, a section for each function, an optional "Under the Hood" section showing the real C code, and a reference table at the bottom.
+
+If you notice the language doing something different from what a page says, that's worth reporting either way. Sometimes the docs are wrong, and sometimes it's a bug in the language. Open an issue in the [interpreter repository](https://github.com/NateTheGrappler/OliNat-Programming-Language/issues) if you think it's the language.
+
+## Working on the Site Itself
+
+The site is built with [React](https://react.dev), [TypeScript](https://www.typescriptlang.org), and [Vite](https://vite.dev). Here's where the main pieces are:
+
+| File or folder                        | What it does                                                  |
+| ------------------------------------- | ------------------------------------------------------------- |
+| `src/config/sections.ts`              | The list of every section and page                            |
+| `src/components/Layout.tsx`           | The overall page layout, picks between the docs and the playground |
+| `src/components/MainContent.tsx`      | Loads and displays the `.mdx` file for the current page       |
+| `src/components/Sidebar.tsx`          | The docs sidebar                                              |
+| `src/components/Playground/`          | The code editor, terminal, and everything that runs Oli-Nat in the browser |
+| `src/WASM/`                           | The Oli-Nat interpreter compiled to WebAssembly               |
+| `src/testCases/`                      | The sample programs in the playground                         |
+| `src/assets/`                         | Stylesheets and images                                        |
+
+**Adding a sample program** is one of the easiest ways to contribute. Drop an `.oli` file into `src/testCases/` and it shows up in the playground's list automatically, using the file name as its label. <br />
+
+**Updating the interpreter** means rebuilding it with Emscripten from the language repository. The steps are in the "Rebuilding the WASM interpreter" section of [Local Setup](https://olinat.net/docs/contributing/getting-started).
+
+## Submitting Your Changes
+
+Before opening a pull request, run these two commands and make sure they both finish without errors:
+
+```bash
+npm run lint
+npm run build
+```
+
+`npm run build` also type checks the whole project, so it catches mistakes that the dev server sometimes lets slide. <br />
+
+Then push your changes to your fork and open a pull request against the main docs repository. In the description, say what you changed and why. If your change affects how the site *looks*, a screenshot or two makes reviewing it a lot faster. <br />
+
+Every contribution gets reviewed, usually within a few days, and I'm always happy to help if you get stuck. See [Ways to Contribute](https://olinat.net/docs/contributing/how-to-help) for how to get in touch. Thank you for helping make these docs better!
