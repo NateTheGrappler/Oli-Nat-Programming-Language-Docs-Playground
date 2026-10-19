@@ -1,0 +1,110 @@
+# Running and Making Tests
+
+In October 2026, I added in a full testing suite with automated Github Workflows to the Oli-Nat programming language repository. For someone that might not be too familiar with DevOps, this means that the Oli-Nat language now has a series of test files that are automatically run and checked using a [python script!](https://github.com/NateTheGrappler/OliNat-Programming-Language/blob/main/tools/bin/run_tests.py) <br />
+
+So, instead of the old way of manually running code through the VM and comparing output by hand ([see the outdated testCases](https://github.com/NateTheGrappler/OliNat-Programming-Language/tree/main/testCases(outdated))), you can now just run a single script and have it determine if your code merges well with the code base! <br />
+
+As a matter of fact, you do not even have to manually run the test cases yourself anymore, even though it is still greatly recommended. The test cases and python script have been added as a part of the workflows on github meaning that the script is ran on every single push to the repo! So if you push your code and you get a green check from the workflows, you know you're all good.
+
+The following portions of this documentation page will outline: <u>Different parts of the test files and layout, how to run these tests, the layout of the existing test suite, as well as adding your own test cases!</u>
+
+## Parts of Test System
+
+| File            | Purpose                                                    |
+| --------------- | ---------------------------------------------------------- |
+| `name.oli`      | The program to run                                         |
+| `name.expected` | Exact stdout the program must print                        |
+| `name.exitcode` | Optional. Expected exit code when it isn't 0               |
+
+There are generally **three** different file extensions that are used inside of the testing environment. <br />
+
+- The `.oli` files are the ones that actually hold the syntax and program that follows the Oli-Nat Programming Language format. These are the files that actually get pushed into the interpreter through the python script, and their output is captured. The name part of a `name.oli` is the name of the new test case, and should match the names of its other files. <br />
+
+- The `.expected` file holds the `stdout` that the program produces. So this is anything that you print out or want the program to print out, and is useful for making sure that an expected value is what it should be. Something like `println(32);` in your `.oli` file would therefore have a matching `32` on line 1 of your `.expected` file. Every test needs one of these, even if the program doesn't print anything, in which case it is just an empty file. If it's missing, the test fails. <br />
+
+- The `.exitcode` files are optional, and are only included for a test that you would *want to error*, so checking that the error handling portion of the compiler or VM works well. These hold the exit code you expect the VM to finish with, which is `70` for a compile time error (like a syntax or type error) and `65` for a runtime error.
+
+The most common ones that you will be using will be the `name.oli` and `name.expected` files, as they cover the most portions of the project that you would want to test. Let it be known that the names of the files that you have working together **MUST BE THE SAME**, otherwise the python script will not be able to match them up properly.
+
+### An Example Error Test
+
+Here is what a full test looks like for something that *should* fail. Say you want to make sure that the type checker stops you from putting a string into an `int` variable:
+
+```java
+//test_cases/types/error_string_into_int.oli
+#pullf io
+println("before");
+make int x = "hello";
+```
+
+This is a type error, so the program never actually runs, and nothing gets printed. That means the `.expected` file is completely **empty**, and the `.exitcode` file just holds:
+
+```
+70
+```
+
+Let it be known that the test only checks the exit code and the printed output, not the actual error message itself, since error messages go to `stderr` instead of `stdout`. So the test makes sure *an* error of the right kind happens, but if you change the wording of an error message, no tests will break.
+
+## Running Tests
+
+Running the tests is very simple, the code is fairly smart, smarter than I always give python credit for, and it knows how to find the `test_cases` folder on its own, no matter which folder you run it from. <br />
+
+The one thing it does need is for the interpreter to be built inside of a folder called `cmake-build` at the root of the repository, since that's where it looks for the `Oli_Nat` executable. If you follow [the installation and building portion of the docs](https://olinat.net/docs/installation), that's exactly where it ends up. <br />
+
+*Note that the script might not work as expected on windows due to the fact that windows builds a .exe file, you are welcome to modify this if you would like*
+
+Once it's built, simply run the following command from the root directory:
+
+```bash
+python3 tools/bin/run_tests.py
+```
+
+That's it, this will automatically look through all of the `.oli` files in the `test_cases` folder and all of its sub-directories, run each one, and compare the real output and exit code to the expected ones. It will print out all of the names of the test cases that pass and fail, show you exactly what was different for any that failed, and then give the final count at the end. It really is as simple as that! <br />
+
+The script will also fail a test if the program takes longer than 10 seconds (so an infinite loop can't hang the whole test run), or if the interpreter itself crashes, like with a segfault.
+
+## Current Layout:
+
+| Folder                 | What it covers                                                       |
+| ---------------------- | -------------------------------------------------------------------- |
+| `lexing/`              | Tokens, literals, comments, identifiers that start with keywords     |
+| `types/`               | Primitives, numeric promotion, division, type errors                 |
+| `operators/`           | Precedence, unary, comparison, short-circuiting, compound assignment |
+| `variables_and_scope/` | Globals, block scope, shadowing                                      |
+| `control_flow/`        | if/else chains, while, for, condition type errors                    |
+| `functions/`           | Parameters, return types, recursion, missing returns, stack overflow |
+| `closures/`            | Upvalue capture, sharing, mutation, loops, nesting                   |
+| `arrays/`              | Element types, indexing, reference semantics, bounds errors          |
+| `strings/`             | Concatenation, interning, every `Strings` library function           |
+| `classes/`             | Fields, defaults, methods, `this`, constructors                      |
+| `inheritance/`         | Inherited fields and methods, overriding, `pullf` parent calls       |
+| `stdlib/`              | io, math, types, utils, fileIO, random, chronos, imports             |
+| `gc/`                  | Garbage collector stress tests: values must survive heavy allocation |
+| `programs/`            | End-to-end programs: FizzBuzz, sorting, primes, a bank, tic-tac-toe  |
+
+*All tests and sub directories of tests must be in the test_cases folder found in root of directory*
+
+This is the current layout of all of the tests, all of them tend to be categorized based on what parts of the overall language they test, although there is also of course some general tests and fun programs as well. <br />
+
+There is a total of 159 tests at the current moment, and I do not really plan to add in any extra in the near future, this is unless of course someone else adds them or a new feature of the language is added. <br />
+
+Generally you would follow the previously described steps of creating a `.oli` program file, along with a `.expected` file (and a `.exitcode` file if it should error) of the same name. You would put them inside of the same directory or sub directory, and that is about it. Feel at liberty to use the existing sub directories for your own test cases or create new ones if you feel it necessary.
+
+## Adding a Test
+
+Adding a test is very simple, write the program first in a `.oli` file, run it manually through the language executable, and then if the output is what you desire or the correct expected outcome of the program, feel free to write that output in a `.expected` file of the same name. If the program is supposed to error, also add a `.exitcode` file with the exit code it finished with. <br />
+
+That is all that needs to be done. Let it be known that there is also an extra flag that is available called `--update`, and can be run as follows:
+
+```bash
+python3 tools/bin/run_tests.py --update
+```
+
+What this extra flag does is run **every** `.oli` file inside of the test_cases directory, and then write whatever the program printed into its `.expected` file, creating it if it doesn't exist and *overwriting it if it does*. If a program exits with an error code, it writes that into a `.exitcode` file too. <br />
+
+This was mostly written for myself for the case of turning some of the existing test cases into ones for the suite, but it can be useful for yourself as well if you do not want to manually create the files. <br />
+
+Make sure that if you do in fact use this flag, that **all** of the code in the test suite does in fact work as intended at that moment, not just your new test. Because it rewrites every expected file, if your change broke something somewhere else, `--update` will happily save the broken output as the new "correct" output, and every test will pass without a care in the world. It's a good idea to run the tests normally first, and only use `--update` once everything is passing except for the new tests you added. <br />
+
+Please do not add in bugged tests as a pull request and assume that it will be merged, I do still check through them to make sure.
+
