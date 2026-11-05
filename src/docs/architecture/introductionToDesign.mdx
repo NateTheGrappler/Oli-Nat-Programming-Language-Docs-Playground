@@ -1,0 +1,128 @@
+# Introduction to Design
+
+Hey! Welcome to the nerdy part of the docs. So far I have done my best to write this documentation as a focus *on Oli-Nat as much as possible*. So I have tried to spare the average viewer from the detail while still giving a good amount of knowledge as to both how and why things work. <br />
+
+This is a little bit different, this section of the documentation is going to be a deep dive into the actual code that makes Oli-Nat under the hood. The codebase is small, at least small by the standards of a language of this caliber. However the topics can get complex, although I do promise you that they are not as bad as they sound. Building a programming language is not the monolithic impossible challenge that it might sound like at face value. <br />
+
+## Overview
+
+Before things get started, I would like to give a bit of an overview on the actual language as a whole. Of course you can check: [Introduction Page's Overview](https://olinat.net/docs/overview), but this little snippet is just going to go over the basics.  <br />
+
+For one I would like to credit [Robert Nystrom's Crafting Interpreters](https://craftinginterpreters.com/) as the book that I used as a self-study for how to build this language. There are a lot of similarities between CLOX and Oli-Nat, and this book really helped to make the foundation of this language and was a great tool to learn. If you are interested in making your own language, no shill, but Nystrom is incredibly funny and actually explains the concepts really well. <br />
+
+With that out of the way here is a basic overview of the pipeline:
+
+```
+Source --> Scanner -> ASTCompiler --> TypeChecker --> ByteCodeCompiler --> GarbageCollector --> VM
+```
+
+Each one of these items above might not make sense to you right now, but you should understand that each step gives more and more context to the data, allowing us to transform it into instruction. This entire process transforms a raw string source code into actual instructions that your computer is able to understand outright. 
+
+## Quick Walk-through
+
+Let's take the following code snippet and see how the pipeline would look at this source string and then try and abstract it out into something that we as programmers can analyze and turn into instruction: 
+
+```java
+#pullf io
+
+make int x = 2 + 3;
+println(x);
+```
+
+### 1. Scanner
+
+The scanner is the first stop, (I know it is second on the actual flow chart, but it is the first code part.) The main point of the scanner is to <u>turn the incoming source string into tokens.</u> You can get a better understanding of what tokens are in [the scanner docs page](https://olinat.net/docs/system-design/scanner), but for now just understand that they are representations of how we can sort of chuck incoming characters into given context. <br />
+
+That is really the best way to describe most processes, you add context to what something is, and why it is where it is. The scanner doesn't know or care whether your code makes sense. It only knows that `make` is a keyword, `x` is a name/identifier, and `2` is a number. Comments and whitespace are thrown away here, so nothing after this stage ever sees them. <br />
+
+*Cool Note:* A lot of different parsers create a string of tokens at once, so basically a giant array, Oli-Nat actually compiles out in a sort of recursive looping fashion, and so each token and string is parsed as needed by the upcoming parts of the pipeline.
+
+### 2. ASTCompiler
+
+The [AST compiler](https://olinat.net/docs/system-design/astCompiler) takes those tokens and figures out how they fit together. It does A LOT of the legwork for the entire pipeline. It takes all of those tokens that it gets one by one from the scanner, and then it binds them based on rules that are set out in a larger rules array. <br />
+
+These rules basically represent the grammar of the language. So the reason why in `2 + 5 * 3`, the `5*3` is evaluated before the `2+5` is. However that can only be done after the AST looks at each token and decides that it is a number it is looking at. So it makes expressions based on each token, and this is once again where a piece of data is looked at and abstracted out into bigger context so it can be better handled. <br />
+
+We create the value, create the expression that the value belongs to as denoted by an **Abstract Syntax Tree**, and at the same time figure out a way to attach a methodology for knowing the type of the expression. All of this being done recursively because of the nature of expression evaluation and **precedence** <br />
+
+Not to even mention the different amounts of set up that needs to be done here and pushed out and everything. This is really the sort of control center where every other actual piece of code always seems to refer back to. <br />
+
+It really is too much to make a short notice of here so please see: [AST compiler documentation](https://olinat.net/docs/system-design/astCompiler) for all of the implementation, design decisions, and niche feature implementations.
+
+### 3. Type Checker
+
+Now the really good part about having gotten through the ASTCompiler and making everything so in depth and well organized; is we are basically at the point in which we can start analyzing some of this data and detail abstraction that we have been doing. <br />
+
+The ASTCompiler actually assigns the type to each expression as the expression is getting made, this is true for single operators like a number `2` is internally type checked as an int, but also true for the outer expressions `2 + 2` which is typed as binary expression with the `+` operator.
+
+This is really good because now we can evaluate these things outright, now we do not actually file out the result of `2+2.0` but instead we check to see that `2` is an int, `+` is a binary operator so we can expect another value, and that `2.0` is a double and so the expression is valid. As a matter of fact we can even add in type promotion.
+
+Each evaluated expression from the bottom of the AST nodes ends up being assigned its own type as we type check as well, so we can recursively check the types, following the pattern of the ASTcompiler! <br />
+
+If anything does not line up, say you tried `make int x = "hello";`, this is where it gets caught, and the program stops with an error **before a single line of it ever runs**. That is the entire point of a statically typed language, whole categories of bugs get caught the moment you try to run your code, instead of halfway through running it. See [the type checker docs](https://olinat.net/docs/system-design/typeChecker) for how each kind of expression actually gets checked.
+
+### 4. ByteCode Compiler
+
+Once the type checker gives the tree its stamp of approval, it gets handed off to the [ByteCode compiler](https://olinat.net/docs/system-design/bytecodeCompiler). This is where we finally stop adding context, and instead start breaking things down into the smallest steps possible. <br />
+
+The bytecode compiler walks through the tree and turns it into **bytecode**, which is a big array of single byte instructions, sometimes followed by a byte or two of extra information, all stored inside of what is called a [chunk](https://olinat.net/docs/system-design/chunks-memory). Our little snippet turns into something roughly like this:
+
+```
+OP_CONSTANT      2
+OP_CONSTANT      3
+OP_ADD
+OP_DEFINE_GLOBAL x
+OP_GET_GLOBAL    println
+OP_GET_GLOBAL    x
+OP_CALL          1
+```
+
+Each one of these instructions is dead simple on its own. "Put a 2 down." "Put a 3 down." "Add the last two things together." All of the complexity of your program gets broken down into a lot of very small, very fast steps. <br />
+
+*Cool Note:* This is actually one of my favorite parts of Oli-Nat's design. In CLOX, there is no tree at all, the compiler emits bytecode directly as it parses, all in one single pass. That is really fast, but it also means there is no good spot to stop and check types. Oli-Nat builds a tree for each declaration *just long enough* for the type checker to look at it, then compiles it down to bytecode and throws the tree away. So you get the safety of a full type check, with the speed of a bytecode VM.
+
+### 5. Virtual Machine
+
+Finally, we get to the part that actually runs your code! The [Virtual Machine](https://olinat.net/docs/system-design/virtualmachine) is, at its heart, just a really big loop with a really big switch statement inside of it. It reads one instruction, does what the instruction says, and then moves on to the next one, over and over until it runs out of instructions. <br />
+
+Oli-Nat's VM is a **stack based** VM, which means it keeps all of the values it is working with on a stack, kind of like a stack of plates. `OP_CONSTANT 2` puts a `2` on top of the stack, `OP_CONSTANT 3` puts a `3` on top of that, and then `OP_ADD` takes both of them off, adds them together, and puts the `5` back on top. <br />
+
+It sounds almost too simple, but function calls, local variables, closures, and class methods all work by just very carefully managing that one stack. Each function call gets its own little window of the stack to work in, and when it returns, that window just gets thrown away.
+
+### The Garbage Collector
+
+You may have noticed the [Garbage Collector](https://olinat.net/docs/system-design/markSweep) is sort of off to the side in the pipeline above, and that is because it is not really a step your code goes through. It runs alongside the VM the whole time your program is running. <br />
+
+Things like strings, arrays, and class instances all live on the heap, and that memory needs to be given back eventually, but you never have to do it yourself like you would in C. Every so often, the garbage collector **marks** every single object that your program can still reach, and then **sweeps** away everything that it could not. This is called *mark and sweep* garbage collection, and it is the same basic idea that a lot of much bigger languages use.
+
+## A Few Design Decisions:
+
+There are a few smaller decisions sprinkled throughout the codebase that I think are worth pointing out, since they show up over and over again in the rest of these docs.
+
+### Compiling Twice
+
+Oli-Nat actually reads your entire program **twice**. The first pass quickly skims through the whole file and only writes down the name, parameters, and return type of every function and class. The second pass is the real compile that goes through all of the steps above. <br />
+
+That first pass is what lets a function call another function that is written further down in the file, since by the time the type checker gets to that call, it already knows exactly what the function looks like.
+
+### Every String is Stored Once
+
+Every string in Oli-Nat is **interned**, which means no matter how many times `"hello"` shows up in your program, only one single copy of it ever exists in memory, stored inside of a big hash table. <br />
+
+The really cool part about this is that checking if two strings are equal turns into just checking if they point to the same spot in memory, which is instant no matter how long the strings are. See [Key Data Structures](https://olinat.net/docs/system-design/dataStructures) for how that hash table works.
+
+### A Standard Library You Opt Into
+
+Nothing outside of the core language is loaded in until you ask for it with [`#pullf`](https://olinat.net/docs/stdlib/overview). The standard library functions are written in C and plugged straight into the VM, so a call to `sqrt()` compiles down to the exact same instructions as a call to a function that you wrote yourself. See [Functions & Natives](https://olinat.net/docs/system-design/functions) for how that all works.
+
+## What Makes Oli-Nat Cool
+
+Even though Oli-Nat started from the design of CLOX, it has grown into its own language. CLOX is dynamically typed, with only one kind of number and no type checker at all. Oli-Nat adds a full static type system on top of that, with `int`, `float`, `double`, `bool`, `string`, typed arrays, and typed classes, a whole extra stage in the pipeline just to check them, classes with inheritance, and a standard library split up into modules you can import. <br />
+
+It also runs right inside of your browser. The [playground](https://olinat.net/playground) is not a simplified copy of the language, it is the *exact same* C code, just compiled to WebAssembly. Even `intake()`, which has to pause the whole program and wait for you to type something in, works in the browser, thanks to a tool called Asyncify that lets the VM pause in the middle of a program and pick back up exactly where it left off. <br />
+
+And of course, it has error messages with a little bit of personality, because programming is supposed to be fun :3
+
+## Where to Go Next
+
+The rest of this section goes through each part of the interpreter in a lot more detail, in the same order that your code travels through it, so if you want to keep reading, the [Chunks & Memory](https://olinat.net/docs/system-design/chunks-memory) page is the next stop. If you would rather see where each part lives inside of the actual code, the [Project Structure](https://olinat.net/docs/contributing/project-structure) page has a file by file map of the whole interpreter. And hey, if you're feeling froggy, check out some of the contribution materials too!
