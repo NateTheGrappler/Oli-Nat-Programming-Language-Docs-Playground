@@ -1,0 +1,432 @@
+## Bytecode
+
+So before we get into the actual pipeline for the language, it is best to run through the main objective of what we want to do. Obviously we want to turn a string of source code into computer instructions and then run them, however what is the best way to go about doing that? <br />
+
+Well, we can use an array of bytecode instructions, so one byte instructions, that can serve as a form of instruction for execution of code. We can use an enum value to express an action, and then add a series of instructions to an array that we can then move around in for things like control flow or functions. This is basically called a chunk. <br />
+
+However, before getting to that, here are the bytecode instructions for Oli-Nat:
+
+| Instruction          | What it does |
+| -------------------- | ------------ |
+| `OP_ADD`             | Pops two values, pushes their sum. Also joins two strings together |
+| `OP_MULTIPLY`        | Pops two values, pushes their product |
+| `OP_SUBTRACT`        | Pops two values, pushes the first minus the second |
+| `OP_NEGATE`          | Pops a number, pushes it with its sign flipped (`-x`) |
+| `OP_DIVIDE`          | Pops two values, pushes the first divided by the second |
+| `OP_RETURN`          | Returns from the current function, handing the return value back to the caller |
+| `OP_NOT`             | Currently unused, `!` is handled by `OP_INVERSE` instead |
+| `OP_EQUAL`           | Pops two values, pushes `true` if they're equal (`==`) |
+| `OP_NOT_EQUAL`       | Pops two values, pushes `true` if they're different (`!=`) |
+| `OP_GREATER`         | Pops two values, pushes the result of `>` |
+| `OP_LESS`            | Pops two values, pushes the result of `<` |
+| `OP_GREATER_EQUAL`   | Pops two values, pushes the result of `>=` |
+| `OP_LESS_EQUAL`      | Pops two values, pushes the result of `<=` |
+| `OP_CONSTANT`        | Pushes a value from the chunk's constant pool, using a 1 byte index |
+| `OP_CONSTANT_LONG`   | Same as `OP_CONSTANT`, but with a 2 byte index, for chunks with more than 256 constants |
+| `OP_POP`             | Throws away the value on top of the stack |
+| `OP_INVERSE`         | Pops a bool, pushes its opposite (`!x`) |
+| `OP_DEFINE_GLOBAL`   | Pops a value and stores it as a new global variable |
+| `OP_SET_GLOBAL`      | Assigns a new value to an existing global variable |
+| `OP_GET_GLOBAL`      | Pushes the value of a global variable |
+| `OP_GET_LOCAL`       | Pushes the value of a local variable from its stack slot |
+| `OP_SET_LOCAL`       | Assigns a new value to a local variable's stack slot |
+| `OP_JUMP_IF_FALSE`   | Jumps forward if the value on top of the stack is `false` (used by `if`, loops, `and`, `or`) |
+| `OP_JUMP`            | Always jumps
+
+All of these are enum values all of an `OpCodes` enum as declared in `chunk.h`. Now do note that a standard enum holds integer values, which by standard are `4 bytes` not just one. However, because there are less than 255 instructions here totally, we can actually just convert all of these to `int8` inside of the chunk struct. <br />
+
+Getting ahead of myself again though sorry, back to the topic at hand. This may look like a really large and scary number of operation codes, but you need to keep in mind, with only these twenty four instructions, we are able to do EVERYTHING a programming language can do. Make classes, functions, add subtract, all of it. <br />
+
+Either way, these are really just mostly used to signal to the [Virtual Machine itself](https://olinat.net/docs/system-design/chunks-memory), on what to do. We store all of these as single bytes inside of our chunk array so we can then read from it, generally using pointer math to traverse the array. With this we can also go back or skip forward into the array for things like if statements or loops, see how in [the ASTCompiler's mentions of skipping around while compiling](https://olinat.net/docs/system-design/astCompiler)<br />
+
+# Chunk Array
+
+The chunk array is a basically a dynamic array implementation with a few more fun properties. To get started, here is the actual struct itself:
+
+```c++
+typedef struct
+{
+    int count;
+    int capacity;
+    int* lines;
+    uint8_t* byteCode;
+    ValueArray constants;
+} Chunk;
+```
+*Found in /include/chunk.h*
+
+Now you notice a few things right off the bat, we have a couple of properties, things like `count` and `capactiy` which are actually the dynamic array portion of the chunk. The thing is that we need to know how large our current array is, so if we ever need to grow beyond it we can allocate more memory dynamically, because we need to do so in C. <br />
+
+We then have a `uint8_t` pointer, which is basically the array of bytecode, and it is how we define an array in C, with a pointer to a continuous chunk of memory. This is also where the type promotion happens, and we turn those bytecode instructions from integers into unsigned 8 bit integers. <br />
+
+You will also notice that the `line` field is actually a pointer, this is because a chunk does not outright own the line variable, it is something that is has access to, but is not directly something that is owned by it, and hence we try to point that out here.
+
+The **value array** is also owned by the chunk, but it will be explained a little bit further down just so the understanding of the chunk is better first.
+
+### Chunk Functions:
+
+Now, we are writing this language in C, so we need to manage our own memory. This means no such things as dynamic arrays, no such things as automatic allocation, no garbage collector to free our memory, and so we need to do that all by ourselves. Starting off with the basic initialization of the chunk struct:
+
+```c++
+void initChunk(Chunk* chunk)
+{
+    chunk-> count=0;
+    chunk->capacity=0;
+    chunk->byteCode=NULL;
+    chunk->lines = NULL;
+    initValueArray(&chunk->constants);
+}
+```
+*Found in /src/chunk.c*
+
+Very simple, we simply create the pointer of the empty struct and then we populate it with place holder data. Until we are ready to start writing to it as needed. <br />
+
+We obviously then need to free the chunk as well:
+
+```c++
+void freeChunk(Chunk* chunk, struct  Vm* vm)
+{
+    FREE_ARRAY(uint8_t, chunk->byteCode, chunk->capacity, vm);
+    FREE_ARRAY(int, chunk->lines, chunk->capacity, vm);
+    freeValueArray(&chunk->constants, vm);
+    initChunk(chunk);
+}
+```
+*Found in /src/chunk.c*
+
+We use some memory macros here, those are also described further down below, notice though that we actually call `initChunk` at the end of the function. We unallocate all of the memory that the chunk did take yes, but we do not outright unallocate the chunk itself, instead we basically zero it out. This is done so if something still accesses the chunk, we do not segfault outright. <br />
+
+Now the fun part:
+```c++
+void writeToChunk(Chunk* chunk, uint8_t byte, int line, struct  Vm* vm)
+{
+    if (chunk->capacity < chunk->count + 1)
+    {
+        int oldCapacity = chunk->capacity;
+        chunk->capacity = GROW_CAPACITY(oldCapacity);
+        chunk->byteCode =  GROW_ARRAY(uint8_t, chunk->byteCode, oldCapacity, chunk->capacity, vm);
+        chunk->lines = GROW_ARRAY(int, chunk->lines, oldCapacity, chunk->capacity, vm);
+    }
+
+    chunk->byteCode[chunk->count] = byte;
+    chunk->lines[chunk->count] = line;
+    chunk->count++;
+}
+```
+*Found in /src/chunk.c*
+
+So this is very basic I understand, however I thought it was SO COOL when I was first writing this. It was my first time actually making a dynamic array in C. Basically though what we do here is we check to see if our current chunk's total capacity is less than if we were to add in another item, and if we are, then we grow the capacity using another memory macro, allocate a new array of that size, and then copy over all of the elements from the old array to the new array. Obviously we then always update our internals, this being the byte that we added, the new line that we got it from, and then update the count of items we hold.
+
+### Value Array
+
+Alright awesome, now we know basically the overall structure of the chunk array. The issue is though that we only have the instructions for what to do with the items, not somewhere where we can store the items. While yes they are stored in part on the stack during runtime, we have nowhere to keep track of them during compilation FOR the runtime, this is where the value array comes in:
+
+```c++
+typedef struct {
+    int capacity;
+    int count;
+    Value* values;
+} ValueArray;
+```
+*Found in /include/value.h*
+
+This might look a bit familiar, it is basically the exact same as our `chunk` struct, except without some of the extra fluff. The only difference is that we now actually store *values* instead of bytecode:
+
+```c++
+typedef struct
+{
+    ValueType type;
+    union
+    {
+        bool boolean;
+        double double_val;
+        float float_val;
+        int   int_val;
+        Obj*  object_val;
+    }as;
+} Value;
+```
+*Found in /include/value.h*
+
+Now these get a bit complex to think about, and I will try my best not to over explain. Basically, we need a way to represent underlying C types in a way that Oli-Nat can understand and do things with. For this we have this `Value` struct, which holds a [union](https://www.w3schools.com/c/c_unions.php), and lets us share the memory between these values. <br />
+
+With this we are able to store a majority of the underlying C type values, and we are even able to hold a `ValueType` enum which we can check for types:
+
+```c++
+typedef enum {
+    //basic
+    VALUE_BOOL,
+    VALUE_INT,
+    VALUE_STRING,
+    VALUE_OBJECT,
+    VALUE_DOUBLE,
+    VALUE_FLOAT,
+    VALUE_CLASS,
+    VALUE_INSTANCE,
+    VALUE_EMPTY,
+    //arrays
+    VALUE_BOOL_ARRAY,
+    VALUE_INT_ARRAY,
+    VALUE_STRING_ARRAY,
+    VALUE_OBJECT_ARRAY,
+    VALUE_DOUBLE_ARRAY,
+    VALUE_FLOAT_ARRAY,
+    VALUE_EMPTY_ARRAY,
+    //error
+    VALUE_ERROR,
+    //for native functions
+    VALUE_ANY,
+    VALUE_ANY_NUM,
+    VALUE_ANY_ARRAY
+} ValueType;
+
+```
+*Found in /include/value.h*
+
+That way we can then later check these out in our [TypeCheckerCode!](https://olinat.net/docs/system-design/typeChecker) and as a matter of fact, while Im tossing out a bunch of code at you, here is a bunch of macros that basically do the wrapping and unwrapping around these `Value` structs and the underlying raw C types:
+
+```c++
+//a bunch of macros for creating objects
+#define CREATE_BOOL_VAL(value)   ((Value){.type = VALUE_BOOL,   .as.boolean    = value})
+#define CREATE_INT_VAL(value)    ((Value){.type = VALUE_INT,    .as.int_val    = value})
+#define CREATE_FLOAT_VAL(value)  ((Value){.type = VALUE_FLOAT,  .as.float_val  = value})
+#define CREATE_DOUBLE_VAL(value) ((Value){.type = VALUE_DOUBLE, .as.double_val = value})
+#define CREATE_OBJECT_VAL(value) ((Value){.type = VALUE_OBJECT, .as.object_val = value})
+#define CREATE_EMPTY_VAL()       ((Value){.type = VALUE_EMPTY,  .as.int_val    = 0})
+
+//type checking macros for safety
+#define IS_BOOL(value)   ((value).type == VALUE_BOOL)
+#define IS_OBJECT(value) ((value).type == VALUE_OBJECT)
+#define IS_INT(value)    ((value).type == VALUE_INT)
+#define IS_FLOAT(value)  ((value).type == VALUE_FLOAT)
+#define IS_DOUBLE(value) ((value).type == VALUE_DOUBLE)
+#define IS_EMPTY(value)  ((value).type == VALUE_EMPTY)
+
+//getting the raw c values from the struct
+#define GET_BOOL_VAL(value)   ((value).as.boolean)
+#define GET_INT_VAL(value)    ((value).as.int_val)
+#define GET_FLOAT_VAL(value)  ((value).as.float_val)
+#define GET_DOUBLE_VAL(value) ((value).as.double_val)
+#define GET_OBJECT_VAL(value) ((value).as.object_val)
+
+```
+*Found in /include/value.h*
+
+Now, you do not outright need to know all of the C things that are happening here, just understand the idea that we use these in order to store values for things we can recognize inside of our `ValueArray` struct. Which is encapsulated and owned by our `Chunk struct`. <br />
+
+It basically acts the exact same way that the Chunk does, in the sense that it has the same freeing and allocating functions, and in fact we even have another chunk function for adding in values into the chunk that I thought would be best to show now:
+
+```c++
+int addConstant(Chunk* chunk, Value value, Vm* vm)
+{
+    push(vm, value); //for gc sake
+    writeValueArray(&chunk->constants, value, vm);
+    pop(vm);
+    return chunk->constants.count - 1;
+}
+```
+*Found in /src/chunk.c*
+
+Now the push and pop are stack operations, which can be found in the [Vm portion of the documentation](https://olinat.net/docs/system-design/virtualmachine), and the reason for that comment `gc sake` is explain by the bugs that took many hours of my life in the [Garbage collector](https://olinat.net/docs/system-design/markSweep) portion of the docs. <br />
+
+Now we basically just write in the value that we created into the chunk's value array, and then return it's index for the sake of being able to reference it. That's really about it as well, There really isn't much else to the chunks, below you can find more about the underlying memory functions.
+
+# Memory Functions
+
+Alright, so I have been mentioning these "memory macros" a whole bunch up above, and now it is time to actually go over them. Remember, we are in C, so every single byte of memory that Oli-Nat uses has to be asked for, and then given back, by us. There is no `new`, no `delete`, and definitely no one cleaning up after us. <br />
+
+The cool part though is that in Oli-Nat, **every single allocation in the entire VM goes through one function.** Growing an array, creating a string, making a class instance, freeing any of them, all of it. That one function is `reallocate()`, and it lives in `/src/memory.c`.
+
+## reallocate()
+
+```c++
+void* reallocate(void* pointer, size_t oldSize, size_t newSize, struct Vm* vm)
+{
+    vm->bytesAllocated += newSize - oldSize;
+    if (newSize > oldSize)
+    {
+#ifdef DEBUG_STRESS_GC
+        collectGarbage(vm);
+#endif
+
+        if (vm->bytesAllocated > vm->nextGC)
+        {
+            collectGarbage(vm);
+        }
+    }
+
+    //if youre freeing something then yk, just free it
+    if (newSize == 0)
+    {
+        free(pointer);
+        return NULL;
+    }
+
+    //allocate to a new point in memory with whatever new given size you got
+    void* result = realloc(pointer, newSize);
+    if (result == NULL) exit(1);
+    return result;
+}
+```
+*Found in /src/memory.c*
+
+This one function handles three completely different jobs, depending on the sizes you pass into it:
+
+| `oldSize` | `newSize`         | What happens                                    |
+| --------- | ----------------- | ----------------------------------------------- |
+| `0`       | anything above 0  | Allocates brand new memory                      |
+| above 0   | bigger or smaller | Resizes existing memory (like growing an array) |
+| above 0   | `0`               | Frees the memory                                |
+
+The actual allocating is handed off to C's own `realloc()`, which is nice because `realloc(NULL, size)` acts just like `malloc()`, so we get "allocate new" for free. Freeing gets its own little branch with `free()`, since passing a size of `0` to `realloc()` does different things depending on the platform, and we would rather not gamble on that. <br />
+
+If `realloc()` ever comes back `NULL`, that means the computer has completely run out of memory, and at that point there is really nothing we can do, so we just exit. <br />
+
+### Why one function?
+
+You might be wondering why we would bother wrapping `realloc()` and `free()` in our own function at all, instead of just calling them directly. The answer is the very first line: `vm->bytesAllocated += newSize - oldSize;` <br />
+
+Because every allocation and every free goes through here, the VM always knows *exactly* how many bytes Oli-Nat currently has in use. And that number is what decides when the [Garbage Collector](https://olinat.net/docs/system-design/markSweep) runs. Whenever we are asking for *more* memory, we check if `bytesAllocated` has passed the `nextGC` threshold, and if it has, we go and clean up before handing out any more. <br />
+
+After each collection, the threshold gets set to double whatever is still in use (that's the `GC_HEAP_GROW_FACTOR` of `2`). So a program that only uses a little bit of memory gets cleaned up often, and a program that genuinely needs a lot of memory doesn't waste all of its time collecting over and over. <br />
+
+*Cool Note:* That `DEBUG_STRESS_GC` flag up top, which you can turn on in `/include/common.h`, makes the garbage collector run on **every single allocation**. It makes Oli-Nat incredibly slow, but it is the best tool there is for finding garbage collector bugs. If you forgot to protect an object somewhere (like that `push` and `pop` in `addConstant()` up above), stress mode makes it break right away, instead of once in a blue moon.
+
+## The Memory Macros
+
+Now, calling `reallocate()` with the right sizes every single time would get really repetitive, and it would be really easy to mess up the math. So instead we have a handful of macros that do the math for us:
+
+```c++
+#define GROW_CAPACITY(capacity) \
+(((capacity)) < 8 ? 8 : (capacity) * 2)
+
+#define GROW_ARRAY(type, pointer, oldCount, newCount, vm) \
+    (type*)reallocate(pointer, sizeof(type) * oldCount, \
+    sizeof(type) * (newCount), vm)
+
+#define FREE_ARRAY(type, pointer, oldCount, vm) \
+    reallocate(pointer, sizeof(type)*oldCount, 0, vm);
+
+#define FREE(type, pointer, vm) reallocate(pointer, sizeof(type), 0, vm)
+
+#define ALLOCATE(type, count, vm) \
+    (type*)reallocate(NULL, 0, sizeof(type)*count, vm);
+```
+*Found in /include/memory.h*
+
+| Macro           | What it does                                                                 |
+| --------------- | ---------------------------------------------------------------------------- |
+| `GROW_CAPACITY` | Works out the next size for a dynamic array: starts at 8, then doubles each time |
+| `GROW_ARRAY`    | Resizes an array of `type` from `oldCount` items to `newCount` items          |
+| `FREE_ARRAY`    | Frees an array of `oldCount` items of `type`                                  |
+| `FREE`          | Frees a single object of `type`                                               |
+| `ALLOCATE`      | Allocates brand new memory for `count` items of `type`                       |
+
+You have already seen most of these in action. `writeToChunk()` uses `GROW_CAPACITY` and `GROW_ARRAY` to grow the bytecode, and `freeChunk()` uses `FREE_ARRAY` to give it all back. <br />
+
+The doubling in `GROW_CAPACITY` is a really common trick for dynamic arrays. If we only grew the array by one slot every time we added a byte, we would be copying the entire array over and over again, every single write. By doubling it instead, those copies get rarer and rarer the bigger the array gets, so on average, adding an item ends up being basically instant.
+
+## Freeing Objects
+
+The last piece of the puzzle is freeing **objects**: the strings, functions, arrays, classes, and everything else that lives on the heap. Each type of object holds different things, so each one needs to be freed a little differently:
+
+```c++
+static void freeObject(Obj* obj, struct Vm* vm)
+{
+    switch (obj->type)
+    {
+        case OBJ_STRING:
+        {
+            ObjString* string = (ObjString*)obj;
+            FREE_ARRAY(char, string->chars, string->length+1, vm);
+            FREE(ObjString, obj, vm);
+            break;
+        }
+        case OBJ_FUNCTION:
+        {
+            ObjFunction* function = (ObjFunction*)obj;
+            //FREE_ARRAY(ParamInfo, function->params, function->arity);
+            freeChunk(&function->chunk, vm);
+            FREE(ObjFunction, obj, vm);
+            break;
+        }
+        case OBJ_STATIC_ARRAY:
+        {
+            ObjStaticArray* array = (ObjStaticArray*)obj;
+            FREE_ARRAY(Value, array->values, array->length, vm);
+            FREE(ObjStaticArray, array, vm);
+            break;
+        }
+        case OBJ_CLOSURE:
+        {
+            ObjClosure* closure = (ObjClosure*)obj;
+            FREE_ARRAY(ObjUpValue*, closure->upValues, closure->upValueCount, vm);
+            FREE(ObjClosure, obj, vm);
+            break;
+        }
+        case OBJ_UPVALUE:
+        {
+            FREE(ObjUpValue, obj, vm);
+            break;
+        }
+        case OBJ_NATIVE:
+        {
+            FREE(ObjNative, obj, vm);
+            break;
+        }
+        case OBJ_CLASS:
+        {
+            ObjClass* klass = (ObjClass*)obj;
+            freeMap(&klass->methods, vm);
+            FREE(ObjClass, obj, vm);
+            break;
+        }
+        case OBJ_INSTANCE:
+        {
+            ObjInstance* instance = (ObjInstance*)obj;
+            FREE_ARRAY(Value, instance->fields, instance->fieldCount, vm);
+            FREE(ObjInstance, obj, vm);
+            break;
+        }
+    }
+}
+```
+*Found in /src/memory.c*
+
+This looks like a lot, but every case follows the exact same pattern: **first free whatever the object owns, and then free the object itself.** A string owns its array of characters, a function owns its chunk of bytecode, an array owns its values, and a class owns its hashmap of methods. <br />
+
+The order really matters here. If we freed the object first, we would lose the pointer to everything it owns, and that memory would just be stuck there forever with no way to get it back. That is what's called a **memory leak**. <br />
+
+A couple of small things worth pointing out:
+
+- Strings free `length + 1` characters, not just `length`, because every C string has that extra `\0` at the end that we have to count too.
+- A closure only frees its *array of pointers* to upvalues, not the upvalues themselves. Other closures might be sharing those same upvalues, so they are separate objects that the garbage collector frees on their own.
+- That commented out line in `OBJ_FUNCTION` is not a mistake. A function's parameters are stored in a fixed size array right inside of the `ObjFunction` struct, so they get freed automatically along with the function.
+- Natives and upvalues don't own anything, so for them it is just a single `FREE`.
+
+### freeObjects()
+
+```c++
+void freeObjects(struct Vm* vm)
+{
+    //free the list of objects stored in the vm
+    Obj* object = vm->objects;
+    while (object != NULL)
+    {
+        Obj* next = object->next;
+        freeObject(object, vm);
+        object=next;
+    }
+}
+```
+*Found in /src/memory.c*
+
+Every object that Oli-Nat creates gets added to one big linked list, starting at `vm->objects`, and each object points to the next one with its `next` field. This is how the VM keeps track of absolutely everything it has ever allocated. <br />
+
+When your program finishes, `freeObjects()` just walks down that whole list and frees every single object, so Oli-Nat always cleans up completely after itself. Notice that we grab `object->next` *before* freeing the object, since once it is freed, we can't safely read anything from it anymore. <br />
+
+That same linked list is also what the garbage collector walks through while your program is running, to find and free the objects that aren't being used anymore. But that is a story for the [Garbage Collector](https://olinat.net/docs/system-design/markSweep) page.
+
+
+
+
