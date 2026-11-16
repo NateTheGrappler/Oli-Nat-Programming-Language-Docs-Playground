@@ -1,0 +1,364 @@
+# Scanner Overview
+
+Alright, the first part of the scanner. It all starts here. Well technically we first start in `main.c` and then we create a virtual machine object which itself calls the compiler and the compiler calls us here. BUT, this is still technically where the ground work gets started. <br />
+
+The entire point of our scanner is to go from `source string` into a `token`. So basically going character by character in a string buffer until we can get a basic idea of what the user might have meant with what they typed. Before getting into the actual scanner object though, lets see what it's trying to make.
+
+# Tokens
+
+Tokens are denoted by a struct that really holds the metadata for the "word" that we are trying to guess:
+
+```c++
+typedef struct
+{
+    TokenType type;
+    const char* lexemeStart;
+    int length;
+    int line;
+} Token;
+```
+*Found in /src/scanner.h*
+
+Now this is rather simple, we basically have a pointer into the portion of the source code, and this because instead of copying the source code with each character that we go through, instead we just keep the actual source string alive in memory for as long as we need it, so we can keep on reading it. <br />
+
+The `lexemeStart` is the start of the token inside of the source string, a `lexeme` is basically just a word pretty much. We also then have `length` which is the offset off chars from the start of the lexeme pointer, just so we know how to get the whole lexeme. `Line` is also then the internal metadata for which line on the program we exist on for better error reporting to the user. <br />
+
+The idea of a token is also not exclusive to the programming language community, they have actually existed for a long time, and are currently featuring a massive expansion in the idea of artificial intelligence, the concept is the exact same. Well the only difference might be the `TokenType`, which is an enum holding the type of token we are dealing with:
+
+```c++
+typedef enum
+{
+    //single char
+    T_LEFT_PAREN, T_RIGHT_PAREN,
+    T_LEFT_BRACE, T_RIGHT_BRACE,
+    T_COMMA, T_DOT, T_MINUS, T_PLUS,
+    T_SEMICOLON, T_SLASH, T_STAR,
+    T_LEFT_BRACKET, T_RIGHT_BRACKET,
+
+    //one or two chars
+    T_BANG, T_BANG_EQUAL,
+    T_EQUAL, T_EQUAL_EQUAL,
+    T_GREATER, T_GREATER_EQUAL,
+    T_LESS, T_LESS_EQUAL,
+    T_OR, T_AND,
+
+    //possibly add support for assignment changes
+    T_PLUS_EQUAL, T_MINUS_EQUAL, T_PLUS_PLUS,
+    T_STAR_EQUAL, T_SLASH_EQUAL, T_MINUS_MINUS,
+
+    //literals
+    T_IDENTIFIER, T_STRING_VAL, T_DOUBLE_VAL,
+    T_INTEGER_VAL, T_FLOAT_VAL,
+
+    //keywords
+    T_FALSE, T_TRUE, T_MAKE, T_WHILE,
+    T_FOR, T_IF, T_ELSE, T_RETURN,
+    T_CLASS, T_FUN, T_EMPTY, T_INHERIT,
+    T_THIS, T_PULLF, T_HASH_PULLF,
+    T_INTEGER, T_FLOAT, T_DOUBLE, T_STRING, T_BOOL,
+
+    //extras
+    T_ERROR, T_EOF
+
+} TokenType;
+```
+*Found in /src/scanner.h*
+
+Each one of these is basically just a classifier, we have single character tokens like `+` or `=`, and then double character tokens like `==` or `&&`. We also have literal values which are just the types, and `T_IDENTIFIER` which is basically things like variable names, the way they are handled is pretty cool and explained down below. <br />
+
+We also have things like reserved keywords such as `for` or `class`, which we search for in a branching manner, notice the difference as well between a `T_INTEGER_VAL` and a `T_INTEGER`, the `T_INTEGER` is used for the actual keyword that declares the type of the incoming value, the `T_INTEGER_VAL` is the actual integer value. <br />
+
+This might seem a bit verbose, but it is really nice because we can actually assign values to different words, being able to separate out things like keywords using this enum, we can outright check the type of the token, and then use the [Pratt Parsing Rules in the ASTCompiler](https://olinat.net/docs/system-design/astCompiler), to produce bytecode instructions.
+
+Making a token is pretty simple, there is really two variations:
+```c++
+static Token makeToken(TokenType type, Scanner* scanner)
+{
+    Token token;
+    token.type = type;
+    token.line = scanner->line;
+    token.lexemeStart = scanner->start;
+    token.length = (int)(scanner->current - scanner->start);
+    return token;
+}
+static Token errorToken(const char* message, Scanner* scanner)
+{
+    //basically makeToken but a little different for errors
+    Token token;
+    token.type = T_ERROR;
+    token.lexemeStart = message;
+    token.length = (int)strlen(message);
+    token.line = scanner->line;
+    return token;
+}
+```
+
+We basically do what we did within the other structs, we initialize the struct and add in the new values with all of the necessary information we gather as we go along, the only caveat is a special error type of token, were we have a specialization for an actual message that this token can hold so we can print this out to the user if they are using a character we cannot parse.
+
+# Scanner Struct
+
+```c++
+typedef struct
+{
+    const char* current; //current char your on
+    const char* start;   //starter char for current token
+    int line;
+} Scanner;
+```
+*Found in /src/scanner.h*
+
+So, the basic scanner struct is pretty simple, we keep the internal line integer, and this is something that we do just throughout, and the reason for this is because you don't really know when an error might occur in a user's program, so you always want to keep track of where you are for mostly error handling reasons. <br />
+
+The next two items however I think would better require the context of the init function for the scanner, and the way in which we get the string from the user:
+
+```c++
+void initScanner(const char* source, Scanner* scanner)
+{
+    scanner->current = source;
+    scanner->start = source;
+    scanner->line = 1;
+}
+```
+*Found in /src/scanner.c*
+
+```c++
+//reading from files, return the source code char array
+static const char* readFile(const char* filepath)
+{
+    FILE* file = fopen(filepath, "rb");
+
+    //handle being unable to read a file
+    if (file == NULL)
+    {
+        fprintf(stderr, "Unable to read file: \"%s\".\n", filepath);
+        exit(74);
+    }
+
+    //seek to the end of the file, set aside that file size, and then go back to start of file
+    fseek(file, 0L, SEEK_END);
+    size_t fileSize = ftell(file);
+    rewind(file);
+
+    //set aside enough memory to store the file and then toss it up in there
+    char* sourceBuffer = (char*)malloc(fileSize + 1);
+    if (sourceBuffer == NULL) { fprintf(stderr, "Not enough memory to read \"%s\".\n", filepath); exit(74); }
+    size_t bytesRead = fread(sourceBuffer, sizeof(char), fileSize, file);
+    if (bytesRead < fileSize) {fprintf(stderr, "Could not read file \"%s\".\n", filepath); exit(74); }
+    sourceBuffer[fileSize] = '\0'; //add EOF char
+
+    fclose(file);
+    return sourceBuffer;
+}
+
+//handle the reference to getting the info from the file and
+//passing it to rest of vm
+static void runFile(const char* filePath, Vm* vm)
+{
+    //get a char array of the source, interpet, then free
+    const char* source = readFile(filePath);
+    vmResult result = interpret(source, vm);
+    free((void*)source);
+
+    if (result == INTERPRET_RUNTIME_ERROR)
+    {
+        exit(65);
+    }
+    if (result == INTERPRET_COMPILE_ERROR)
+    {
+        exit(70);
+    }
+}
+```
+*Found in /src/main.c*
+
+The code here gets a bit verbose, but I thought it would be good to include, this is basically a very basic way of reading strings from a file in c, the issue is we need to allocate enough memory for the whole string, but we do not know how much content is actually in the file right. This is why we use `fseek()` in order to find the end of the file so we can then go back, allocate the right amount, and then write to the buffer, thats a bit over simplified, but this is how we end up with our source of a character array right. <br />
+
+The thing here however, is that we need to be able to keep this string somehow, and this is actually done by having the source string exist for the ENTIRE RUNTIME of the program, so that way if we need to read it again, we can just reference the memory instead of copying it. Thus, we pass this pointer over to the scanner continuously, and then we keep track of where the scanner is in the source string. <br />
+
+The difference between Oli-Nat and a lot of other languages is that each token is read as needed, the scanner does not parse the whole source string in one go, instead going as requested by the compiler, hence why we need to keep track of where we are in the source string during compile time.
+
+# Scanner Helper Functions
+
+Now we get into the juicy bits of the scanner, the first few things I think worth mentioning before the main meaty loop is the few helper functions, I won't paste the code for every single one outright, you can find it [here](https://github.com/NateTheGrappler/OliNat-Programming-Language/blob/main/src/scanner.c) if you would like to see that:
+ 
+### Safety and Behavior Functions
+```c++
+static bool isAtEnd(Scanner* scanner)
+{
+    return *scanner->current == '\0';
+}
+static bool match(char expected, Scanner* scanner)
+{
+    if (isAtEnd(scanner)) return false;
+    if (*scanner->current != expected) return false;
+
+    //if found, consume char and return true
+    scanner->current++;
+    return true;
+}
+```
+*Found in /src/scanner.c*
+
+These two functions right here are basically are just check functions, if we are at the end of the allotted source string buffer then we don't want to keep going because then we read out of array bounds, and lord knows good things do not happen when you do that. So we always check to be sure <br />
+
+We also then have the `match` function, in which we basically use it to check if the current character is what we think it might be, this is useful because if we have a `+` then we need to be able to recognize if we have something like `++` or `+=`, and we do so by using this match function and creating the token accordingly.
+
+### Consuming Characters
+
+```c++
+static char advance(Scanner* scanner)
+{
+    //return current token and advance to next one
+    return *scanner->current++;
+}
+static char peekChar(Scanner* scanner)
+{
+    return *scanner->current;
+}
+static char peekNextChar(Scanner* scanner)
+{
+    if (isAtEnd(scanner)) return '\0';
+    return scanner->current[1];
+}
+```
+*Found in /src/scanner.c*
+
+This is about as simple as it sounds, but is very useful as well. Basically we need to obviously be able to move throughout this char array freely in order to parse these tokens, and so we have these functions that basically just allow us to do pointer math in C in order to traverse this array. The three functions for example allow us to consume a character, read the character we are at, and read the upcoming character. <br />
+
+These are very useful in doing things like parsing a string, or seeing the difference with a number if a int, double, or float, because we can consume the characters until we hit a `.` for example right.
+
+### Skipping whitespace:
+
+```c++
+//skipping all that whitespace nonsense
+static void skipWhiteSpace(Scanner* scanner)
+{
+    for (;;)
+    {
+        //printf("stuck in loop");
+        char c = peekChar(scanner);
+        switch (c)
+        {
+            case ' ':   //regular spaces
+            case '\r':  //moves cursor to column one
+            case '\t':  //tabs
+                advance(scanner);
+                break;
+            case '\n':  //newline
+                scanner->line++;
+                advance(scanner);
+                break;
+            //comments
+            case '/':
+                if (peekNextChar(scanner) == '/')
+                {
+                    while (peekChar(scanner) != '\n' && !isAtEnd(scanner)) advance(scanner);
+                    break;
+                }
+                return;
+            default: return;
+        }
+    }
+}
+```
+
+*Found in /src/scanner.c*
+
+Before we scan any token, we first call `skipWhiteSpace()`, which does exactly what it sounds like. It just keeps looking at the current character, and as long as it is a space, a tab, or a `\r`, it eats it up and moves on, until it hits something that actually matters. <br />
+
+This is also one of the most important spots for the `line` counter we have been carrying around. Every time we skip over a `\n`, we bump `scanner->line` up by one, and that is the ONLY place in the whole scanner that the line count goes up. So every token that gets made after that knows exactly which line it came from, which is how every error message in Oli-Nat can tell you `at line 12`. <br />
+
+Comments get handled right here too. If we see a `/`, we peek at the character after it, and if that is another `/`, then we know it's a comment, and we just skip every single character until we hit the end of the line. That means comments never even become tokens, the rest of the pipeline has no idea they ever existed. If the next character is *not* a `/`, then we return without consuming anything, because that `/` is actually a division sign (or a `/=`), and the main scanner loop will deal with it. <br />
+
+*Cool Note:* Because all whitespace just gets thrown away, Oli-Nat follows the same idea as C or C++, where spacing and newlines don't actually mean anything to the language. Statements end with a `;` and blocks are wrapped in `{ }`, so you could technically write your entire program on one single line if you really wanted to (please don't). This is the opposite of a language like Python, where the indentation is actually part of the syntax.
+
+# Main Scanner Loop:
+
+```c++
+Token scanToken(Scanner* scanner)
+{
+    skipWhiteSpace(scanner);
+
+    scanner->start = scanner->current;
+
+    if (isAtEnd(scanner)) {return makeToken(T_EOF, scanner); }
+
+    char c = advance(scanner);
+
+    if (isDigit(c)) return number(scanner);
+    if (isAlpha(c)) return identifier(scanner);
+    //printf("Character getting scanner: '%c'.", c);
+
+    switch (c)
+    {
+        //single char tokens
+        case '(': return makeToken(T_LEFT_PAREN,  scanner);
+        case ')': return makeToken(T_RIGHT_PAREN, scanner);
+        case '{': return makeToken(T_LEFT_BRACE,  scanner);
+        case '}': return makeToken(T_RIGHT_BRACE, scanner);
+        case '[': return makeToken(T_LEFT_BRACKET,  scanner);
+        case ']': return makeToken(T_RIGHT_BRACKET, scanner);
+        case ';': return makeToken(T_SEMICOLON,   scanner);
+        case ',': return makeToken(T_COMMA,       scanner);
+        case '.': return makeToken(T_DOT,         scanner);
+
+
+        //possibly single or double tokens
+        case '*': return makeToken(match('=', scanner) ? T_STAR_EQUAL    : T_STAR,    scanner);
+        case '/': return makeToken(match('=', scanner) ? T_SLASH_EQUAL   : T_SLASH,   scanner);
+        case '=': return makeToken(match('=', scanner) ? T_EQUAL_EQUAL   : T_EQUAL,   scanner);
+        case '!': return makeToken(match('=', scanner) ? T_BANG_EQUAL    : T_BANG,    scanner);
+        case '>': return makeToken(match('=', scanner) ? T_GREATER_EQUAL : T_GREATER, scanner);
+        case '<': return makeToken(match('=', scanner) ? T_LESS_EQUAL    : T_LESS,    scanner);
+        case '|': if (match('|', scanner)) return makeToken(T_OR, scanner);
+        case '&': if (match('&', scanner)) return makeToken(T_AND, scanner);
+        case '+':
+        {
+            if (match('+', scanner)) return makeToken(T_PLUS_PLUS, scanner);
+            if (match('=', scanner)) return makeToken(T_PLUS_EQUAL, scanner);
+            return makeToken(T_PLUS, scanner);
+        }
+        case '-':
+        {
+            if (match('-', scanner)) return makeToken(T_MINUS_MINUS, scanner);
+            if (match('=', scanner)) return makeToken(T_MINUS_EQUAL, scanner);
+            if (match('>', scanner)) return makeToken(T_INHERIT, scanner);
+            return makeToken(T_MINUS, scanner);
+        }
+        //handle strings
+        case '"': return string(scanner); //TODO: see if you can add chars
+    }
+
+    //base return case for error tokens
+    return errorToken("An unexpected character was encountered, what on earth are you typing?", scanner);
+
+}
+```
+
+
+*Found in /src/scanner.c*
+
+And here it is, the main loop of the scanner! Although I call it a loop, `scanToken()` actually only makes **one** token every time it gets called. The compiler calls it over and over whenever it needs the next token, and that repeated calling is the "loop". <br />
+
+Every call starts the exact same way. We skip any whitespace and comments, and then we set `scanner->start` to wherever `current` is, which marks the beginning of the new token. If we are at the end of the source string, we hand back a `T_EOF` token, which is how the compiler knows there is nothing left to read. Otherwise, we `advance()` once to grab the first character, and decide what to do based on what it is. <br />
+
+Numbers and words get checked for first. If the character is a digit, we go off to `number()` to scan the rest of the number, and if it is a letter, an `_`, or a `#` (that last one is how `#pullf` gets scanned as a single word), we go off to `identifier()`, which scans the whole word and then figures out if it is a keyword like `make` or just a regular name like `x`. <br />
+
+Everything else is really just one big switch case. The single character tokens are as easy as it gets, a `(` is always a `T_LEFT_PAREN`, no questions asked. The interesting ones are the characters that can *start* more than one token. Take `=` for example: it could be `=` all on its own, or the start of `==`. So we use that `match()` function from earlier, if the very next character is also a `=`, we consume it and make a `T_EQUAL_EQUAL`, and if not, we just make a `T_EQUAL`. <br />
+
+The `+` and `-` cases take this a step further, since there are three possible tokens each, and this is where the **order of the checks** really matters:
+
+```c++
+case '+':
+{
+    if (match('+', scanner)) return makeToken(T_PLUS_PLUS, scanner);
+    if (match('=', scanner)) return makeToken(T_PLUS_EQUAL, scanner);
+    return makeToken(T_PLUS, scanner);
+}
+```
+
+We always check for the longer tokens first, and only fall back to the plain single `+` once we know it isn't anything else. If we checked the other way around and returned a `T_PLUS` straight away, then `x++` would get scanned as `x`, `+`, `+`, and `x += 1` would turn into `x`, `+`, `=`, `1`, which is a completely different (and broken) program. This is sometimes called *maximal munch*: the scanner always grabs the longest token it possibly can. The `-` case works the same way, just with one extra option, the `->` arrow used for [inheritance](https://olinat.net/docs/guides/Inheritance). <br />
+
+Strings get handed off to their own `string()` function, which keeps consuming characters until it finds the closing `"` (and gives back an error token if it never does). <br />
+
+Finally, if a character makes it all the way through without matching *anything*, like a `@` or a `$`, we fall out of the switch and return an error token, with a message asking the user what on earth they are typing.
