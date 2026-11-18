@@ -126,7 +126,7 @@ export const sections: Section[] = [
         ]},
         
         {slug: 'dataStructures',            title: 'Key Data Structures'},
-        {slug: 'functions',                 title: 'Functions & Natives'}
+        {slug: 'functions',                 title: 'Functions & Closures'}
 
     ],
     nextRoute: '/docs/contributing/getting-started',
