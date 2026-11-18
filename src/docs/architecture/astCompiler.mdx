@@ -1,0 +1,1296 @@
+# AST Compiler
+
+Alright ladies and gentlemen, we are finally at the meat of the language. Everything else is really supplementary to the AST Compiler. It is the head chef of the whole dish, and it is also the largest part of Oli-Nat, taking up about 1700 of the roughly 7000 lines of C in the interpreter. <br />
+
+This means the page is going to be lengthy, and a lot of what is here builds on the parts that came before it. It isn't terrible, but it is one of the harder parts of the language. <br />
+
+The AST compiler asks the scanner for one token at a time, and from those tokens it builds **expressions** that represent what the code means. Each expression is handed to the [type checker](https://olinat.net/docs/system-design/typeChecker) to make sure it is valid, then to the [bytecode compiler](https://olinat.net/docs/system-design/bytecodeCompiler), and then it is freed before we move on to the next one. One expression at a time. <br />
+
+I know that is a lot of context to take in at once, so here is that whole pattern in its smallest form, from one of the first functions in the compiler:
+
+```c++
+static void expressionStatement(ASTparser* parser, TypeChecker* checker, AstCompiler* compiler, Vm* vm)
+{
+    //compile and check expression, then compile again to bytecode
+    Expr* expr = astExpression(parser, compiler, vm);
+    ValueType type = checkExpression(checker, expr, parser);
+
+    if (type != VALUE_ERROR)
+    {
+        compileBytecode(expr, parser, &compiler->function->chunk, compiler, vm);
+        emitByte(OP_POP, &compiler->function->chunk, parser, vm);
+    }
+
+    //consume the ; and free memory
+    consume(T_SEMICOLON, "Please end all of your expressions with a ';'!", "SYNTAX ERROR", parser);
+    freeExpr(expr, vm);
+}
+```
+*Found in /src/ASTcompiler.c*
+
+This is a beautiful representation of the whole process. `astExpression()` walks through the tokens of an expression, something like `2+3`, and turns them into a tree with the `+` on top and the `2` and `3` underneath it. How it does that is the Pratt parsing section further down. <br />
+
+Right after the tree is built, we hand it to the type checker. It walks the tree and works out how the types inside of it interact. This is the real advantage of a statically typed language: we know what the type of an expression *should* be from the types inside of it, so if it doesn't mesh, we can report an error before running any buggy code. <br />
+
+If the expression passes, we compile it to bytecode, which goes onto the chunk to be run by the VM when compilation is done. Then we `consume` the `;` and free the tree. <br />
+
+Notice that this is an `expressionStatement`. There are **expressions** and there are **statements** in the compiler, and they are treated differently. An expression is something that evaluates to a value, like `1+2 == 3`. A statement is something that does something, like `1+2;` or `if (1+2 == 3)`. Statements are built out of expressions, and they are parsed in a different way, which we will get to. <br />
+
+We also call `consume` here, which shows up all over the compiler. We say which token we expect next. If it is there, we move past it, and if it isn't, we report an error. It is why a lot of languages make you put a `;` after each statement, it tells the parser exactly where one statement ends so it can start on the next. (The code for `consume` is in the Error Handling section at the bottom.)
+
+# The Parser and Compiler Structs
+
+The last section showed how the compiler fits into the rest of the VM, but its main purpose is to create **Abstract Syntax Trees**. Before we get to those, there are a few structs that hold everything together, starting with the simplest:
+
+```c++
+typedef struct ASTparser
+{
+    Scanner scanner;
+    Token current;
+    Token previous;
+    bool hadError;
+    bool panicMode;
+} ASTparser;
+```
+*Found in /src/ASTcompiler.h*
+
+This is the parser itself, and it is more bookkeeping than action. We keep track of the `current` token we are looking at and the `previous` one, which gives us context. We also track whether there was a syntax error, and whether we are in `panicMode`, which is how we recover from one (see Error Handling below). It also owns the scanner, since the parser is the thing that asks for each new token.
+
+```c++
+typedef struct AstCompiler
+{
+    Local locals[MAX_LOCALS];
+    UpValueInfo upvalues[MAX_UPVALUES];
+    int localCount;
+    int scopeDepth;
+    bool isTopLevel;
+    bool isClassMethod;
+    ObjFunction* function; //that you write to
+    struct AstCompiler* enclosing;
+} AstCompiler;
+```
+*Found in /src/ASTcompiler.h*
+
+If the parser is tied to the scanner, this struct is tied to the bytecode we are writing. A compiler is simple when there is only one array of bytecode, but that changes as soon as we have functions. Every function owns its own chunk of bytecode, so every function needs its own compiler to keep track of where we are: which `function` we are writing to, how many locals it has, and how deep into scopes we are. <br />
+
+Each compiler also points to the compiler of the function around it with `enclosing`, so they form a chain, with the top level script on the outside. A new one is created every time we *compile a function*, and that chain is what makes closures possible, because a function can follow `enclosing` outward to find a variable it didn't declare. <br />
+
+If it feels like a bit much, it is. Going from a single bytecode array to many, while still keeping every local variable on one stack, is one of the harder ideas in the language. Just imagine it as a little compass for "which bytecode am I writing to right now?"
+
+```c++
+typedef struct {
+    const char* name;
+    int length;
+    int depth;
+    bool isCaptured;
+} Local;
+```
+*Found in /src/ASTcompiler.h*
+
+A `Local` is a local variable. Blocks create different levels of scope in a program, and an inner scope can use the variables of the scope around it, but not the other way around. A variable also stops existing once its scope ends. <br />
+
+A `Local` stores the name of the variable, the length of that name, how deep in scopes it was declared, and whether a closure has captured it. Its index in the `locals` array is also its stack slot at runtime, so we can find it easily.
+
+# The Abstract Syntax Tree
+
+```c++
+typedef enum {
+    EXPR_LITERAL,
+    EXPR_BINARY,
+    EXPR_UNARY,
+    EXPR_GROUPING,
+    EXPR_ASSIGN,
+    EXPR_VARIABLE,
+    EXPR_CALL,
+    EXPR_STATIC_ARRAY,
+    EXPR_GET_ARRAY_INDEX,
+    EXPR_SET_ARRAY_INDEX,
+    EXPR_OR,
+    EXPR_AND,
+    EXPR_SET_FIELD,
+    EXPR_GET_FIELD,
+    EXPR_THIS,
+    EXPR_PULLF
+} ExprType;
+```
+*Found in /src/Expr.h*
+
+You know, in all honesty, copy and pasting this enum, I did not remember there being this many expressions haha. Either way, these are all of the different expressions the AST compiler can build. The enum is not just decoration either. The type checker and the bytecode compiler both `switch` on it to know which kind of node they are looking at.
+
+```c++
+typedef struct Expr {
+    ExprType type;
+    int line;
+    union {
+        Literal literal;
+        Binary binary;
+        Unary unary;
+        Variable variable;
+        Grouping grouping;
+        VarAssignment var_assignment;
+        Call objectCall;
+        staticArray staticArray;
+        GetArray getArray;
+        SetArray setArray;
+        AndExpr andExpr;
+        OrExpr orExpr;
+        SetField setField;
+        GetField getField;
+        Exprthis _this;
+        ExprPullf pullf;
+    };
+} Expr;
+```
+*Found in /src/Expr.h*
+
+This is the `Expr` struct, the main building block of the Abstract Syntax Tree. It is the same tagged union idea as `Value` back in [Chunks & Memory](https://olinat.net/docs/system-design/chunks-memory): the `type` says which kind of node this is, and everything inside of the `union` shares the same memory, so an `Expr` is only as big as its largest node. That is a fun little C trick that lets us define lots of different expressions while still passing them around as one type. <br />
+
+Every node also stores the `line` it came from, which is what lets error messages point at the right spot. Each node type has its own `createX()` function, like `createBinary()` below, and there is one `freeExpr()` that walks a tree and frees all of it. <br />
+
+Each struct inside of the union is a slightly different kind of operation we can perform in the language. In the example below we see `Binary`, which holds two expressions and a mathematical operator:
+
+```c++
+typedef struct
+{
+    struct Expr* left;
+    struct Expr* right;
+    const char* operator;
+} Binary;
+```
+*Found in /src/Expr.h*
+
+This is one of those tree nodes, and you can see how it starts to look like a tree data structure. We have a pointer to another node on the left and on the right, which are the things the operator works on. So for `1 + 2`, `left = 1`, `right = 2`, and `operator = +`. <br />
+
+The reason `left` and `right` are expressions, and not just numbers, is so they can nest. `(1+2) / (5-9)` is a binary expression whose left and right are *also* binary expressions, each with a literal on its left and right. <br />
+
+Of course the AST compiler has a LOT of responsibility here, not only do we need to know what to do with an expression, we need to know how and when to build it. Building one looks like this:
+
+```c++
+Expr* createBinary(Expr* left, Expr* right, const char* operator, int line, struct Vm* vm)
+{
+    //allocate the expr in memory and set it's type
+    Expr* expr = (Expr*)reallocate(NULL, 0, sizeof(Expr), vm);
+    expr->type = EXPR_BINARY;
+    expr->line = line;
+
+    expr->binary.operator = operator;
+    expr->binary.right = right;
+    expr->binary.left = left;
+    return expr;
+}
+```
+*Found in /src/Expr.c*
+
+Thanks to Pratt parsing we know there is an expression on the left, an expression on the right, and an operator between them, so we must have a binary expression. No matter what those two sides are, literals or other compound expressions, they have already been built by the time we get here (see Pratt Parsing below), so we can rely on them directly. <br />
+
+The code is simple. We allocate a new `Expr` through `reallocate()` (see [Chunks & Memory](https://olinat.net/docs/system-design/chunks-memory)), set its type to `EXPR_BINARY`, fill in the fields, and return it. Then it can be passed into another `createX()` function, over to the type checker, or the bytecode compiler, shoot maybe even all three!
+
+# Pratt Parsing
+
+This is one of the really fundamental concepts in the whole compiler. Pratt parsing is a method of applying an order of operations while we parse. Inside of an expression, certain things go before others: multiplication before addition, negation before multiplication, all of that. Pratt parsing lets us handle all of it with one small table and one small function. <br />
+
+*Cool Note:* It is named after Vaughan Pratt, who described it back in 1973. It is one of those techniques that is pretty simple once it clicks, but looks like magic until it does.
+
+### Precedence
+
+```c++
+typedef enum
+{
+    PREC_NONE,
+    PREC_ASSIGNMENT,    // =
+    PREC_OR,            // || / or
+    PREC_AND,           // && / and
+    PREC_EQUALITY,      // ==
+    PREC_COMPARISION,   // >, <, >=, <=
+    PREC_TERM,          // +, -
+    PREC_FACTOR,        // *, /
+    PREC_UNARY,         // -, !
+    PREC_CALL,          // . ()
+    PREC_PRIMARY        //literal values like strings or bools or doubles
+} Precedence;
+```
+*Found in /src/ASTcompiler.c*
+
+These are the precedence levels of Oli-Nat, ordered from the loosest binding to the tightest. `PREC_TERM` (`+`, `-`) binds looser than `PREC_FACTOR` (`*`, `/`), which is exactly why multiplication happens first. Since this is a C enum, these levels are really just numbers, which means we can compare them with a plain `<=`. We will lean on that a lot. <br />
+
+Every token in the language is given one of these levels in the rules table below. For a token like `+`, its level says how tightly it grabs the expressions on either side of it.
+
+### The Rules Table
+
+```c++
+typedef Expr* (*PrefixFn)(bool canAssign, ASTparser* parser, AstCompiler* compiler, Vm* vm);
+typedef Expr* (*InfixFn)(bool canAssign, ASTparser* parser, AstCompiler* compiler,  Expr* left, Vm* vm);
+
+typedef struct
+{
+    PrefixFn prefix;
+    InfixFn infix;
+    Precedence precedence;
+} ParseRule;
+```
+*Found in /src/ASTcompiler.c*
+
+Before we get to the table itself, it helps to know what is in each rule. C has function pointers, which let us store a *function* inside of a variable, so every token can carry around the function that knows how to parse it. A `ParseRule` has three parts:
+
+- `prefix`: the function to call if this token **starts** an expression, like the `5` in `5 + 3`.
+- `infix`: the function to call if this token shows up **after** an expression, like the `+` in `5 + 3`.
+- `precedence`: how tightly this token binds when it is used as an infix.
+
+And here is the table that uses them:
+
+```c++
+ParseRule rules[] = {
+  [T_LEFT_PAREN]    = {grouping,functionCall,PREC_CALL},
+  [T_LEFT_BRACKET]   = {Array,acesssArray,PREC_CALL},
+  [T_DOT]           = {NULL,      dot,   PREC_CALL},
+  [T_MINUS]         = {unary,     binary,PREC_TERM},
+  [T_PLUS]          = {NULL,     binary, PREC_TERM},
+  [T_SEMICOLON]     = {NULL,     NULL,   PREC_NONE},
+  [T_STAR]          = {NULL,     binary, PREC_FACTOR},
+  [T_EQUAL_EQUAL]   = {NULL,     binary, PREC_EQUALITY},
+  [T_IDENTIFIER]    = {variable, NULL,   PREC_NONE},
+  [T_INTEGER_VAL]   = {number,   NULL,   PREC_NONE},
+  [T_AND]           = {NULL,     _and,   PREC_AND},
+  [T_OR]            = {NULL,     _or,    PREC_OR},
+    //... one row for every token type
+};
+```
+*Found in /src/ASTcompiler.c (trimmed)*
+
+The reason prefix and infix are separate is that the *context* a token appears in changes what it means. `T_MINUS` is a great example because it has both. In `-x` there is nothing to the left of it, so it is a prefix and calls `unary`. In `a - b` it comes after an expression, so it is an infix and calls `binary`. Same token, two jobs. <br />
+
+A few more of those are in the table. `T_LEFT_PAREN` is `grouping` when it starts an expression, like `(1 + 2)`, but `functionCall` when it follows one, like `add(1, 2)`. `T_LEFT_BRACKET` is an array literal, `[1, 2, 3]`, or indexing, `numbers[0]`. Tokens like `T_INTEGER_VAL` or `T_IDENTIFIER` can only *start* an expression, so their infix is `NULL`. <br />
+
+A `NULL` means that token can't start (prefix) or continue (infix) an expression. Any token left out of the table is automatically filled in with `NULL`, `NULL`, `PREC_NONE` by C, so tokens like `;` are listed mostly so I remember they exist. That `PREC_NONE` is still important though, because it is how the following function knows when to stop when it reaches something like a `;` or a `)`. The rules array is the real brains of the operation, and this function is what puts it to use:
+
+### parserPrecedence()
+
+```c++
+static Expr* parserPrecedence(Precedence precedence, ASTparser* parser, AstCompiler* compiler, Vm* vm)
+{
+    //advance to next token, get the rule for the literal value and then some
+    //error catching for bad snytax
+    advance(parser);
+    PrefixFn prefixRule = getRule(parser->previous.type)->prefix;
+    if (prefixRule == NULL)
+    {
+        error("Expected expression", "SYNTAX ERROR", parser);
+        return NULL;
+    }
+
+    bool canAssign = precedence <= PREC_ASSIGNMENT; //for when i add variables
+    Expr* left = prefixRule(precedence <= PREC_ASSIGNMENT, parser, compiler, vm);
+
+    //consume the actual expression operator and what not, lead the recursive portion of
+    //this setup
+    while (precedence <= getRule(parser->current.type)->precedence)
+    {
+        advance(parser);
+        InfixFn infixRule = getRule(parser->previous.type)->infix;
+        left = infixRule(canAssign, parser, compiler, left, vm);
+    }
+
+    return left;
+}
+```
+*Found in /src/ASTcompiler.c*
+
+This is the MOST IMPORTANT function in the entire codebase, at least on the compilation side of things. Every single expression starts here, and most of them come back here several times before they are done. So let's go through it line by line. <br />
+
+First, we call `advance()`, which consumes the next token and stores it as `parser->previous`. Then we use that token's type to index straight into the `rules[]` array, which gives us its `ParseRule`, and from that we grab its **prefix** function. <br />
+
+Why prefix first? Because every expression has to *start* with something: a number, a variable name, a `-`, a `(`, and so on. If the token we just read doesn't have a prefix function, like a `)` or a `;`, then it can't possibly start an expression, so we report `Expected expression` and bail out. <br />
+
+Next is `canAssign`. It's a bit of shoddy craftsmanship on my part, but it does an important job: it decides whether an `=` is allowed at this point. Assignment has the lowest precedence of everything, so `canAssign` is only true when we are parsing at `PREC_ASSIGNMENT` level. That way `a = 5` works, but in something like `a + b = 5`, the `b` gets parsed at a higher precedence (as the right side of the `+`), so it isn't allowed to be assigned to. <br />
+
+Then we call the prefix function, which turns that first token into an expression, like a literal `2`, and stores it in `left`. <br />
+
+Now for the loop, which is where the recursion and the precedence magic really happens. The loop looks at the *next* token, and as long as it is an operator whose precedence is **at least as high** as the precedence we were called with, we keep going. We `advance()` past the operator, get its **infix** function, and call it with everything we have built so far as `left`. The infix function parses the right-hand side and hands back a new, bigger expression, which becomes our new `left`. <br />
+
+Let's trace `2 + 3 * 4`:
+
+1. We start at the lowest precedence, since `astExpression()` is really just `parserPrecedence(PREC_ASSIGNMENT)`. The prefix function for `2` gives us `left = 2`.
+2. The next token is `+` (`PREC_TERM`), which is high enough, so we call `binary()` for it.
+3. `binary()` parses its right side by calling `parserPrecedence()` again, but at one level *above* `PREC_TERM`.
+4. Inside that call, the prefix function for `3` gives us `left = 3`. The next token is `*` (`PREC_FACTOR`), which is high enough for this call, so the loop keeps going and builds `3 * 4`.
+5. Then we hit the `;`, which has `PREC_NONE`, so that inner call stops and returns `3 * 4` back to `binary()`, which builds `2 + (3 * 4)`.
+
+The end result is a tree with the `+` at the top and the `*` underneath it, on the right:
+
+```
+    +
+   / \
+  2   *
+     / \
+    3   4
+```
+
+Since the tree gets evaluated from the bottom up, `3 * 4` is calculated before the `+`, which is exactly what the rules of math say should happen. <br />
+
+If the expression had been `2 * 3 + 4` instead, the inner call for the `*` would run into the `+`, see that `PREC_TERM` is *lower* than what it was asked for, and stop. It would return just `2 * 3`, and the outer loop would pick up the `+ 4` afterwards. So the precedence check in that `while` condition is what decides which operator grabs which numbers.
+
+```c++
+static Expr* binary(bool canAssign, ASTparser* parser, AstCompiler* compiler, Expr* left, Vm* vm)
+{
+    //compile the second literal and also check out the type of operation you got
+    TokenType operatorType = parser->previous.type;
+    ParseRule* rule = getRule(operatorType);
+    Expr* right = parserPrecedence((Precedence)(rule->precedence+1), parser, compiler, vm);
+
+    switch (operatorType)
+    {
+        case T_PLUS:          return createBinary(left, right, "+", parser->previous.line, vm);
+        case T_MINUS:         return createBinary(left, right, "-", parser->previous.line, vm);
+        case T_STAR:          return createBinary(left, right, "*", parser->previous.line, vm);
+        case T_SLASH:         return createBinary(left, right, "/", parser->previous.line, vm);
+        case T_BANG_EQUAL:    return createBinary(left, right, "!=", parser->previous.line, vm);
+        case T_EQUAL_EQUAL:   return createBinary(left, right, "==", parser->previous.line, vm);
+        case T_GREATER:       return createBinary(left, right, ">", parser->previous.line, vm);
+        case T_GREATER_EQUAL: return createBinary(left, right, ">=", parser->previous.line, vm);
+        case T_LESS:          return createBinary(left, right, "<", parser->previous.line, vm);
+        case T_LESS_EQUAL:    return createBinary(left, right, "<=", parser->previous.line, vm);
+    }
+}
+```
+*Found in /src/ASTcompiler.c*
+
+This is one of the more fun functions. `binary()` handles every operator that sits between two expressions. By the time it runs, the left side already exists (it was passed in as `left`) and the operator was just consumed, so all it has to do is parse the right side and put the two together. That is how `(1/3*5) + (-2+36-5)` is handled just as cleanly as `1 + 2`. <br />
+
+The most important part is that `+1` in `rule->precedence+1`. It asks `parserPrecedence()` to parse the right side at one level *above* the operator we are on. That means the right side will grab anything that binds **tighter** than this operator, but stop at anything at the same level or lower. Two things come out of that: <br />
+
+In `3 + 2 * 4` the `*` is tighter than `+`, so the right side of the `+` grabs all of `2 * 4`, and we get `3 + (2 * 4)`. And in `10 - 4 - 3` the second `-` is the *same* level, so the right side of the first `-` stops before it, and the outer loop picks it up with `10 - 4` as its left, giving `(10 - 4) - 3`. This is called **left associativity**, and it is what we want. Without the `+1` we would get `10 - (4 - 3)`, which is `9` instead of `3`. <br />
+
+After that it is a big, not very elegant `switch` that looks at which token the operator was and creates the node. You might notice that the operator gets stored as a string like `"+"`, and not as an enum. It might seem verbose, but later on this lets the type checker and the bytecode compiler just use `strcmp` on it, which makes the inconvenience very much worth it.
+
+# Parsing Expressions
+
+For the sake of being thorough, and in doubt of my own explaining capability, here is what parsing a literal value looks like, and then a look at how `&&` and `||` are a bit special in Oli-Nat.
+
+```c++
+static Expr* number(bool canAssign, ASTparser* parser, AstCompiler* compiler, Vm* vm)
+{
+    //handle all three possible numbers you can have
+    switch (parser->previous.type)
+    {
+        case T_DOUBLE_VAL:
+        {
+            double value = strtod(parser->previous.lexemeStart, NULL);
+            return createLiteralDouble(value, parser->previous.line, vm);
+        }
+        case T_FLOAT_VAL:
+        {
+            float value = strtof(parser->previous.lexemeStart, NULL);
+            return createLiteralFloat(value, parser->previous.line, vm);
+        }
+        case T_INTEGER_VAL:
+        {
+            long value = strtol(parser->previous.lexemeStart, NULL, 10);
+            return createLiteralInt((int)value, parser->previous.line, vm);
+        }
+        default:
+            return NULL; //unreachable (hopefully)
+
+    }
+}
+```
+*Found in /src/ASTcompiler.c*
+
+Even though Oli-Nat has multiple kinds of number, we can handle them all in one function. We already know we have a number, so we use C's built in `strtod`, `strtof`, and `strtol` to go from the text in your source code to a real C value, which we store in a literal node. From there it gets type checked and turned into an Oli-Nat value, and then into bytecode.
+
+```c++
+static Expr* _and(bool canAssign, ASTparser* parser, AstCompiler* compiler, Expr* left, Vm* vm)
+{
+    Expr* right = parserPrecedence(PREC_AND, parser, compiler, vm);
+    return createAnd(left, right, parser->previous.line, vm);
+}
+static Expr* _or(bool canAssign, ASTparser* parser, AstCompiler* compiler, Expr* left, Vm* vm)
+{
+    Expr* right = parserPrecedence(PREC_AND, parser, compiler, vm);
+    return createOr(left, right, parser->previous.line, vm);
+}
+```
+*Found in /src/ASTcompiler.c*
+
+A little extra tidbit that fits best here. `&&` and `||` don't go through `binary()`, they get their own nodes, `EXPR_AND` and `EXPR_OR`. The reason is that they **short-circuit**. If the left side of an `&&` is false, the whole expression has to be false, so the right side never needs to run. For `||` it is the opposite: if the left side is true, we are already done. <br />
+
+It is worth being clear that this has nothing to do with *parsing*. The parser still reads both sides, because it has to build the whole tree either way. The short-circuiting happens later, in the bytecode compiler. When it sees an `EXPR_AND` it emits a jump that skips over the bytecode for the right side if the left is already false, the exact same jump trick that `if` statements use (see Control Flow below). A regular `binary` node couldn't do that, because for those we always run both sides before applying the operator. A separate node is how the bytecode compiler knows to emit jumps instead. <br />
+
+*Cool Note:* This is why `false && (1 / 0 == 1)` is perfectly safe in Oli-Nat. On its own, that division would throw a divide by zero error, but here it never runs.
+
+### Syntactic Sugar
+
+```c++
+static Expr* variable(bool canAssign, ASTparser* parser, AstCompiler* compiler, Vm* vm)
+{
+    //save the name of the var
+    const char* name = parser->previous.lexemeStart;
+    int length = parser->previous.length;
+    int line = parser->previous.line;
+
+    if (match(T_EQUAL, parser) && canAssign)
+    {
+        Expr* value = astExpression(parser, compiler, vm);
+        return createVarAssignment(name, length, value, line, vm);
+    }
+
+    Expr* self = createVariable(name, length, line, vm); //helper for doing the fancy += syntax
+    if (match(T_PLUS_EQUAL, parser) && canAssign)
+    {
+        Expr* value = astExpression(parser, compiler, vm);
+        Expr* binary = createBinary(self, value, "+", line, vm);
+        return createVarAssignment(name, length, binary, line, vm);
+    }
+    //... the same pattern for -=, *=, /=, ++ and --
+    return self;
+}
+```
+*Found in /src/ASTcompiler.c (trimmed)*
+
+Here's something I think is really cool. You might expect that shortcuts like `+=` and `++` would need their very own expression node, or maybe even their own opcode. They don't! Instead, the parser quietly **rewrites** them into code that already exists. <br />
+
+When `variable()` sees `x += 5`, it builds the exact same tree it would have built if you'd typed out `x = x + 5` by hand. It makes a `Variable` node for `x` (that's the `self` in the code), puts it in a `Binary` node with your value and a `+`, and then wraps the whole thing in a regular `VarAssignment`. `x++` works the same way, just with a literal `1` as the right side, so it becomes `x = x + 1`. <br />
+
+This trick is called **desugaring**, because shortcuts like these are known as *syntactic sugar*. They make the language nicer to write, but they don't add anything the language couldn't already do. Real compilers use this technique all the time, and the payoff is huge: the type checker and bytecode compiler never even find out that `+=` exists. They only ever see a normal assignment and a normal addition, which they already know how to handle, so I didn't have to touch either of them to add these shortcuts. <br />
+
+It also means the shortcuts follow the exact same rules as the long version. If `x` is an `int`, then `x += 2.5` is a type error, because `x = x + 2.5` would be too. <br />
+
+*Cool Note:* There is one side effect you might not expect if you're coming from C. In C, `x++` gives back the *old* value of `x`, before the increment. Since Oli-Nat turns `x++` into `x = x + 1`, it gives back the *new* value. So if `x` is `5`, `println(x++);` prints `6`, not `5`.
+
+```c++
+        if (match(T_PLUS_PLUS, parser))
+        {
+            Expr* get = createGetField(left, fieldName, nameLength, line, vm);
+            Expr* one = createLiteralInt(1, line, vm);
+            Expr* binary = createBinary(get, one, "+", line, vm);
+            //create a copy of left since it would get shared between binary and this and get freed twice
+            Expr* leftCopy = ALLOCATE(Expr, 1, vm);
+            *leftCopy = *left;
+            return createSetField(leftCopy, binary, fieldName, nameLength, line, vm);
+        }
+```
+*Found in /src/ASTcompiler.c (trimmed, inside dot())*
+
+Fields get the same treatment inside of `dot()`. Under the hood, `instance.field++` becomes `instance.field = instance.field + 1`, and is compiled that way. We love to add some sugar. <br />
+
+There is one wrinkle. Both the "get" and the "set" halves of that rewrite need the `instance` expression (`left`), and if two nodes pointed at the same child, `freeExpr()` would free it twice and the compiler would segfault. So we make a `leftCopy`, which turns one expression into two.
+
+# Declarations and Statements
+
+So far, most of what I have talked about has been **expressions**. Expressions use Pratt parsing and become the expression structs above. **Statements** work differently, they use plain *recursive descent*: functions that look at the next token, decide what kind of statement it is, and call the function for it, which can in turn call back into `declaration()` for anything nested inside. This section goes into more detail.
+
+```c++
+static void declaration(ASTparser* parser, TypeChecker* checker, AstCompiler* compiler, Vm* vm)
+{
+    if (match(T_MAKE, parser))
+    {
+        //get / consume the declaraed type, and then name
+        ValueType type = getVarDeclarationType(parser, checker);
+
+        //check for [] for arrays
+        if (match(T_LEFT_BRACKET, parser))
+        {
+            consume(T_RIGHT_BRACKET, "Please match all '[' with a ']',", "SYNTAX ERROR", parser);
+            type = toArrayType(type);
+        }
+
+        //get var name
+        consume(T_IDENTIFIER, "You must name your variables and functions, they get sad if you dont.", "SYNTAX ERROR", parser);
+
+
+        if (check(T_LEFT_PAREN, parser))
+        {
+            functionDeclaration(parser, checker, compiler, vm, type, false);
+        }
+        else
+        {
+            varDeclaration(parser, checker, compiler, vm, type);
+        }
+    }
+    else if (match(T_HASH_PULLF, parser))
+    {
+        nativeFunction(parser, checker, compiler, vm);
+    }
+    else if (match(T_CLASS, parser))
+    {
+        classDeclaration(parser, checker, compiler, vm);
+    }
+    else
+    {
+        statement(parser, checker, compiler, vm);
+    }
+
+    if (parser->panicMode) synchronize(parser);
+}
+```
+*Found in /src/ASTcompiler.c*
+
+This is the dispatcher. Whenever something gets declared, it comes through here, and we use the first token as a keyword to decide where to go. Shocking, I know. <br />
+
+`make` could start either a variable or a function. We read the type (and any `[]`) and then the name, and what comes *next* tells us which one it is: a `(` means it is a function, anything else means it is a variable. `#pullf` goes to `nativeFunction()` for loading a library, and `class` goes to `classDeclaration()`. You will see both of those later on. Anything else falls through to `statement()`. <br />
+
+The last line is the important one. If any error was reported while handling that declaration, we call `synchronize()`, which skips ahead to where the next declaration probably starts so we don't get a flood of false errors. That is covered in Error Handling at the bottom.
+
+```c++
+static void statement(ASTparser* parser, TypeChecker* checker, AstCompiler* compiler, Vm* vm)
+{
+    if (match(T_LEFT_BRACE, parser))
+    {
+        beginScope(compiler);
+        block(parser, checker, compiler, vm);
+        endScope(compiler, checker, vm, parser);
+    }
+    else if (match(T_IF, parser))
+    {
+        ifStatement(parser, checker, compiler, vm);
+    }
+    else if (match(T_WHILE, parser))
+    {
+        whileStatement(parser, checker, compiler, vm);
+    }
+    else if (match(T_FOR, parser))
+    {
+        forStatement(parser, checker, compiler, vm);
+    }
+    else if (match(T_RETURN, parser))
+    {
+        returnStatement(parser, checker, compiler, vm);
+    }
+    else
+    {
+        expressionStatement(parser, checker, compiler, vm);
+    }
+}
+```
+*Found in /src/ASTcompiler.c*
+
+If we are not declaring something, then we must be doing some kind of scope or control flow, and that is what `statement()` sorts out. A `{` starts a new block. Notice that a block does **not** create a new compiler, it only makes the scope one level deeper with `beginScope()` and `endScope()`. A new `AstCompiler` is only ever created for functions. `block()` then just keeps calling `declaration()` until it finds the `}`, so declarations and statements keep calling each other, hence the recursive descent. <br />
+
+The final `else` is the fallback: if it isn't any of the above, it is an `expressionStatement`. This is probably the function that gets hit the most, since every plain expression goes through it to start the process described at the top of this page.
+
+### Variables
+
+```c++
+static void varDeclaration(ASTparser* parser, TypeChecker* checker, AstCompiler* compiler, Vm* vm, ValueType type)
+{
+    const char* name = parser->previous.lexemeStart;
+    int nameLength = parser->previous.length;
+
+
+
+    //get the equal and parse the expression
+    consume(T_EQUAL, "Expected a '=' after you declare a new variable.", "SYNTAX ERROR", parser);
+    Expr* varInitializer = astExpression(parser, compiler, vm);
+    consume(T_SEMICOLON, "Expected ';' after you declare a new variable", "SYNTAX ERROR", parser);
+
+
+    //check the type of the expression vs the declared type
+    ValueType realType = checkExpression(checker, varInitializer, parser);
+    if (realType != type)
+    {
+        error("A variable expression's type must be the same as it's declared type.", "TYPE MISMATCH ERROR", parser);
+        freeExpr(varInitializer, vm); //fix possible leak on error
+        return;
+    }
+
+
+    if (compiler->scopeDepth == 0)
+    {
+        //set the global to get defined here
+        addSymbol(checker, name, nameLength, compiler->scopeDepth, type, NULL, parser);
+
+        //check to see if the type is a class declaration somewhere, and update the metadata in the typechecker to know what class it is
+        if (type == VALUE_INSTANCE)
+        {
+            Symbol* symbol = lookUpSymbol(checker, name, nameLength);
+            symbol->className = checker->lastClassName;
+            symbol->classNameLength = checker->lastClassNameLength;
+        }
+
+        compileBytecode(varInitializer, parser, &compiler->function->chunk, compiler, vm);
+        emitDefineGlobal(name, nameLength, &compiler->function->chunk, parser, vm);
+        freeExpr(varInitializer, vm);
+    }
+    else
+    {
+        //declare a new local and then actually parse the value
+        Local* local = &compiler->locals[compiler->localCount++];
+        local->name = name;
+        local->length = nameLength;
+        local->depth = compiler->scopeDepth;
+
+        //the compiled value ends up on the stack and IS the local
+        addSymbol(checker, name, nameLength, compiler->scopeDepth, type, NULL, parser);
+
+        //check to see if the type is a class declaration somewhere, and update the metadata in the typechecker to know what class it is
+        if (type == VALUE_INSTANCE)
+        {
+            Symbol* symbol = lookUpSymbol(checker, name, nameLength);
+            symbol->className = checker->lastClassName;
+            symbol->classNameLength = checker->lastClassNameLength;
+        }
+
+        compileBytecode(varInitializer, parser, &compiler->function->chunk, compiler, vm);
+        freeExpr(varInitializer, vm);
+    }
+
+}
+```
+*Found in /src/ASTcompiler.c*
+
+Okay, basic theory aside, let's look at what an actual declaration looks like. The most basic one is a variable declaration. <br />
+
+By the time we are in here, we already know we had a `make` and a name. We then consume the `=`, since Oli-Nat does not allow empty definitions, every variable needs a value when it is created. After that, things are really simple because the rest of the statement is just an expression! So for `make x = 5 + 3;`, we have already handled `make` and `x`, we consume the `=`, and all that is left is `5 + 3`, which is compiled with everything described above. Then we consume the `;` to end the statement. <br />
+
+Next the type checker gets a look. We check the type of the expression against the type that was declared, and if they don't match, we report an error. Then we add the variable to the type checker's **symbol table** with `addSymbol()`, which is how the checker remembers later on that `x` is an `int`. <br />
+
+That is the easy part. Now we need to know *where* this variable lives, which depends on the scope. A global variable is stored in a hashmap that can be accessed from anywhere, so we just emit an instruction to define it by its (interned) name. A local variable instead lives on the program's stack until its scope ends. For those, we claim the next free slot in the compiler's `locals` array and fill in the name and depth. The fun part is that we store the local in the compiler in the exact same order that it appears on the stack! The compiled value ends up on top of the stack and *is* the local, so we don't need any extra work to keep track of it. Speaking of scope:
+
+### Scopes
+
+```c++
+static void endScope(AstCompiler* compiler, TypeChecker* checker, Vm* vm, ASTparser* parser)
+{
+    compiler->scopeDepth--;
+
+    //pop locals
+    while (compiler->localCount > 0 && compiler->locals[compiler->localCount-1].depth > compiler->scopeDepth)
+    {
+        if (compiler->locals[compiler->localCount-1].isCaptured)
+        {
+            emitByte(OP_CLOSE_UPVALUE, &compiler->function->chunk, parser, vm);
+        }
+        else
+        {
+            emitByte(OP_POP, &compiler->function->chunk, parser, vm);
+        }
+        compiler->localCount--;
+    }
+
+    //pop in tandem with symbol table
+    while (checker->varCount > 0 &&
+       checker->symbols[checker->varCount - 1].depth > compiler->scopeDepth)
+    {
+        checker->varCount--;
+    }
+}
+```
+*Found in /src/ASTcompiler.c*
+
+Scope, for anyone who might not know, is the access level you have at a given point in the code. It lets you separate code into hierarchies, so you can declare a variable outside of a block and use it inside, or declare one inside of a block and have it disappear once that block ends. <br />
+
+This function handles that second part. When we leave a scope we go back one level, and every local that was declared in the scope we just left has to come off the stack. So we walk backwards through the `locals` and emit an `OP_POP` for each one, which is the lifetime of a scoped variable, translated directly into bytecode. We do the same walk through the type checker's symbol table so it forgets those variables too. <br />
+
+There is one special case, closures. If a local was **captured** by a function that is using it from an outer scope, then it can't just be thrown away when the scope ends, so we emit `OP_CLOSE_UPVALUE` instead, which moves the value off of the stack and onto the heap so the closure can keep using it. More on that in the Functions and Closures section.
+
+# Control Flow
+
+Going in, control flow was something I didn't have much of an idea about. I understood that we needed to choose one of two options when deciding which code to run, but it was beyond me how things like loops work. The funny thing is that the solution is so obvious once you hear it, but truly genius. <br />
+
+We don't create some new branch of bytecode. We just **jump around** inside of it. The bytecode is really just an array of instructions, so for an `if`, we check the condition and then either run the next instruction or jump over the code. Loops are the same thing, except at the end of the body we jump *backwards*. <br />
+
+That is all fine and dandy, but there is a catch. When we emit a jump over the body of an `if`, we haven't compiled that body yet, so we have no idea how far to jump. How do we deal with that?
+
+```c++
+void patchJump(int offset, Chunk* currentChunk, ASTparser* parser)
+{
+    short jump = currentChunk->count - offset - 2;
+
+    if (jump > UINT16_MAX)
+    {
+        error("Too much code to jump over twin.", "MEMORY ERROR", parser);
+    }
+
+    currentChunk->byteCode[offset] = (jump >> 8) & 0xff;
+    currentChunk->byteCode[offset+1] = jump & 0xff;
+}
+```
+*Found in /src/ASTcompiler.c*
+
+This is the `patchJump()` function. It looks a bit weird at first with all of that bit math, but the idea is simple. We emit the `OP_JUMP` instruction followed by a **placeholder** of two bytes where the distance will go. Then we compile the body like normal, and once we are finished, we know how big it was, so we go **back** and fill in the placeholder with the real distance. This is called *back-patching*. The bit math is just splitting that distance into two separate bytes, since each slot in the bytecode array is only one byte wide. <br />
+
+The catch is that a two byte distance limits how far we can jump, to a bit over sixty five thousand bytes of bytecode. We could allocate more, but very rarely will a single `if` block be anywhere near that, so we trade a bit of range for space. Here is where it is used:
+
+```c++
+static void ifStatement(ASTparser* parser, TypeChecker* checker, AstCompiler* compiler, Vm* vm)
+{
+    consume(T_LEFT_PAREN, "Please supplement your if statement with a '(' after 'if'.", "SYNTAX ERROR", parser);
+    Expr* condition = astExpression(parser, compiler, vm);
+    consume(T_RIGHT_PAREN, "Please close your if statement's condition with ')'.","SYNTAX ERROR", parser);
+
+
+    ValueType conditionType = checkExpression(checker, condition, parser);
+    if (conditionType != VALUE_BOOL)
+    {
+        error("If condition must be a boolean.", "TYPE MISMATCH ERROR", parser);
+    }
+    compileBytecode(condition, parser, &compiler->function->chunk, compiler, vm);
+    freeExpr(condition, vm); //forgot to free condition expr haha
+
+    //emit a jump instruction with then two supplementary bytes to store how large the jump is
+    short jumpIndex = emitJump(OP_JUMP_IF_FALSE, &compiler->function->chunk, parser, vm);
+    emitByte(OP_POP, &compiler->function->chunk, parser, vm);         //get condition value off stack TODO: see if this causes issues
+    statement(parser, checker, compiler, vm);     //parse block
+
+    short elseJump = emitJump(OP_JUMP, &compiler->function->chunk, parser, vm); //always jump if found
+
+    patchJump(jumpIndex, &compiler->function->chunk, parser);
+    emitByte(OP_POP, &compiler->function->chunk, parser, vm);
+
+
+    if (match(T_ELSE, parser))
+    {
+        statement(parser, checker, compiler, vm);     //parse else block
+    }
+    patchJump(elseJump, &compiler->function->chunk, parser);
+
+}
+```
+*Found in /src/ASTcompiler.c*
+
+The context from the previous sections makes this syntax easy to parse. We look for the `if` keyword, and then we know an expression in parenthesis is next. (Technically you often don't need the `()`, but I like them, and it is my language, so they stay.) That expression is type checked to make sure it is a boolean, and then it is compiled, which leaves the result of the condition on the stack. <br />
+
+Now for the fun part. We emit an `OP_JUMP_IF_FALSE` with a two byte placeholder, compile the body of the `if`, and *then* call `patchJump()` to go back and fill the placeholder in with how far we just came. Here is what the chunk looks like at each moment, using a made up body of five bytes:
+
+```
+Right after emitting the jump, we don't know the distance yet:
+
+  offset
+    10    OP_JUMP_IF_FALSE
+    11    0x00     <-- placeholder, high byte  (this is the offset we remember)
+    12    0x00     <-- placeholder, low byte
+
+Then we compile the body, and the else jump after it:
+
+    13    OP_POP
+  14-18   ...the body of the if (5 bytes)...
+    19    OP_JUMP
+  20-21   0x00 0x00  <-- another placeholder, for skipping the else
+    22    OP_POP   <-- this is where a false condition should land
+
+Now patchJump(11) goes BACK and fills in the hole:
+
+    distance = 22 (where we are now) - 11 (the hole) - 2 (the hole's own size) = 9
+
+    11    0x00     <-- high byte of 9
+    12    0x09     <-- low byte of 9
+```
+
+When the VM runs this and the condition is false, it reads those two bytes, jumps forward `9`, and lands on the `OP_POP` that sits right before the `else` code. <br />
+
+You might notice there are two `OP_POP`s. `OP_JUMP_IF_FALSE` only *looks* at the condition, it doesn't remove it from the stack, so each branch has to pop it itself. <br />
+
+The `else` works the same way. If we choose to run the `if` code, we need a way to skip over the `else`, which is that second `OP_JUMP` that always jumps. If we skip the `if`, we just land at the `else` code. This is also why `else if` works for free, since an `else` is just followed by another statement, and that statement can be another `if`. <br />
+
+Nothing has to count the body for us, either. Its instructions were written into the chunk by the recursive call to `statement()`, so by the time we call `patchJump()`, the size of the body is simply how much the chunk has grown. That is how we get the distance. That is really all there is to it, we get to skip code or run it, but what if we want to repeat code?
+
+```c++
+static void emitLoop(int loopStart, ASTparser* parser, AstCompiler* compiler, Vm* vm)
+{
+    emitByte(OP_LOOP, &compiler->function->chunk, parser, vm);
+
+    int offset = compiler->function->chunk.count - loopStart + 2;
+    if (offset > UINT16_MAX) error("Loop body is too large.", "MEMORY ERROR", parser);
+
+    emitByte(((offset >> 8) & 0xff), &compiler->function->chunk, parser, vm);
+    emitByte((offset  & 0xff), &compiler->function->chunk, parser, vm);
+}
+```
+*Found in /src/ASTcompiler.c*
+
+It is not that different, except it goes the other way. `OP_LOOP` is emitted at the **end** of the loop body, and it jumps **backwards** to the start of the loop, where the condition gets checked again. If the condition is still true we run the body again, and if it is false, the `OP_JUMP_IF_FALSE` from the start of the loop jumps us out. <br />
+
+The cool part is that we don't need a placeholder this time. When a jump goes forward we have to guess and come back, but when a jump goes backward, the place we are jumping to is already in the chunk and we remember where it was (`loopStart`). So we can work out the distance right away: how far the chunk has grown since `loopStart`, plus the two bytes of the distance itself.
+
+```c++
+static void forStatement(ASTparser* parser, TypeChecker* checker, AstCompiler* compiler, Vm* vm)
+{
+    beginScope(compiler);
+    consume(T_LEFT_PAREN, "Please use a '(' character after the for keyword.", "SYNTAX ERROR", parser);
+
+    if (match(T_SEMICOLON, parser))
+    {
+        //no
+        //initializer, infinite loop
+    }
+    else if (match(T_MAKE, parser))
+    {
+        ValueType type = getVarDeclarationType(parser, checker);
+        consume(T_IDENTIFIER, "You must name your variables and functions, they get sad if you dont.", "SYNTAX ERROR", parser);
+        varDeclaration(parser, checker, compiler, vm, type);
+    }
+    else
+    {
+        expressionStatement(parser, checker, compiler, vm);
+    }
+
+    int loopStart = compiler->function->chunk.count;
+
+    int exitJump = -1;
+    if (!match(T_SEMICOLON, parser))
+    {
+        //calculate the actual condition
+        Expr* expr = astExpression(parser, compiler, vm);
+        ValueType type = checkExpression(checker, expr, parser);
+        if (type != VALUE_BOOL) { error("A for loops condition must evaluate to a boolean expression.", "SYNTAX ERROR", parser); }
+
+        compileBytecode(expr, parser, &compiler->function->chunk, compiler, vm);
+        consume(T_SEMICOLON, "The code expects ';' after a for loop conditional.", "SYNTAX ERROR", parser);
+        freeExpr(expr, vm); //forgot to free condition expr haha
+
+        exitJump = emitJump(OP_JUMP_IF_FALSE, &compiler->function->chunk, parser, vm);
+        emitByte(OP_POP, &compiler->function->chunk, parser, vm);
+
+    }
+
+    int bodyJump = -1;
+    int incrementStart = -1;
+    if (!match(T_RIGHT_PAREN, parser))
+    {
+        //evaluate the expression changing the loop
+        bodyJump = emitJump(OP_JUMP, &compiler->function->chunk, parser, vm);
+        incrementStart = compiler->function->chunk.count;
+
+        Expr* expr = astExpression(parser, compiler, vm);
+        compileBytecode(expr,parser, &compiler->function->chunk, compiler, vm);
+        freeExpr(expr, vm); //forgot to free condition expr haha
+
+        emitByte(OP_POP, &compiler->function->chunk, parser, vm);
+        consume(T_RIGHT_PAREN, "Expect ')' after for loop clauses", "SYNTAX ERROR", parser);
+
+        emitLoop(loopStart, parser, compiler, vm);
+        loopStart = incrementStart;
+        patchJump(bodyJump, &compiler->function->chunk, parser);
+    }
+    else
+    {
+        consume(T_RIGHT_PAREN, "Expect ')' after for clauses", "SYNTAX ERROR", parser);
+    }
+
+    statement(parser, checker, compiler, vm);
+    emitLoop(loopStart, parser, compiler, vm);
+
+    if (exitJump != -1)
+    {
+        patchJump(exitJump, &compiler->function->chunk, parser);
+        emitByte(OP_POP, &compiler->function->chunk, parser, vm);
+    }
+
+    endScope(compiler, checker, vm, parser);
+}
+```
+*Found in /src/ASTcompiler.c*
+
+This is probably the harder of the two examples I could have chosen between a `while` and a `for` loop. A `while` is just a condition, a body, and an `emitLoop()`. But technically every `for` loop is a `while` loop in disguise, it just has a little more going on. <br />
+
+A `for` has three clauses, `for (make int i = 0; i < 3; i++)`. The **initializer** runs once, before the loop. It is either a variable declaration, which goes through the same `varDeclaration()` we already went over, or an expression. The **condition** is checked at the start of every loop, and it is an expression that has to evaluate to a boolean, just like the `if`. The initializer and condition can be skipped by going straight to the `;`. And the **increment** is an expression that runs at the end of every loop. <br />
+
+Notice that the loop variable is scoped to the `for` loop itself, that is why the whole function is wrapped in `beginScope()` and `endScope()`. <br />
+
+Here is the tricky part. In the source, the increment is written *before* the body, but it has to run *after* it. We are compiling in a single pass from left to right, so we can't just reorder it. Instead we use jumps. After the condition, we emit a jump that hops over the increment (`bodyJump`), then compile the increment, and then emit a loop back up to the condition. Then we say that the *end of the body* should loop back to the increment instead of the condition (`loopStart = incrementStart`). Here is the layout it ends up with:
+
+```
+        initializer                           runs once
+
+   A:   condition                             <-- loopStart
+        OP_JUMP_IF_FALSE   --> jump to X      <-- exitJump
+        OP_POP
+        OP_JUMP            --> jump to C      <-- bodyJump
+
+   B:   increment                             <-- incrementStart
+        OP_POP
+        OP_LOOP            --> back to A      (recheck the condition)
+
+   C:   body
+        OP_LOOP            --> back to B      (run the increment)
+
+   X:   OP_POP                                (the loop is over)
+```
+
+So the first time through we skip the increment and run the body, and every time after that the body finishes, runs the increment, and then rechecks the condition. All of it is just forward jumps that get patched and backward jumps that don't need to be. <br />
+
+In all honesty it is a very verbose way of saying that we keep track of a variable's state, and based on some condition of it, we either jump forward in the bytecode, or run the code and jump back to where we started.
+
+# Functions and Closures
+
+```c++
+static void initFunctionCompiler(AstCompiler* newCompiler, AstCompiler* enclosing, const char* name, int nameLength, ValueType returnType, bool isTopLevel, bool isMethod, Vm* vm, TypeChecker* checker, ASTparser* parser)
+{
+    memset(newCompiler, 0, sizeof(AstCompiler)); //zero out the compiler so it doesnt read garbage memory for an inner function and just die
+
+    //zero out the compilers inner crap for locals
+    newCompiler->isClassMethod = isMethod;
+    newCompiler->localCount = 1;
+    newCompiler->scopeDepth = (enclosing == NULL) ? 0 : 1;
+    newCompiler->enclosing = enclosing;
+    newCompiler->isTopLevel = isTopLevel;
+
+    if (newCompiler->isClassMethod)
+    {
+        //tke up slot 0 for the 'this' keyword in the locals array instead of having it be the closure as normal
+        //at least for methods
+        Local* local = &newCompiler->locals[0];
+        local->name = "this";
+        local->length = 4;
+        local->depth = 1;
+    }
+
+    //create the function compiler will fill and add to symbol table for recursive calls
+    newCompiler->function = newFunction(name, nameLength, returnType, vm);
+    push(vm, CREATE_OBJECT_VAL((Obj*)newCompiler->function)); //push onto stack to protect from gc
+
+    if (!isTopLevel && !isMethod) { addSymbol(checker, name, nameLength, newCompiler->scopeDepth, returnType, newCompiler->function, parser); }
+
+}
+```
+*Found in /src/ASTcompiler.c*
+
+Every function gets its own `AstCompiler`, and this is the function that sets one up. It is linked to the compiler of the function around it through `enclosing`, which is the chain I mentioned earlier. A few things in here are worth pointing out: <br />
+
+- The `memset` zeroes the whole struct first. The compiler lives on the C stack, so without it, it would be full of leftover garbage from whatever used that memory before, and we would read random locals.
+- `localCount` starts at `1`, because slot `0` is reserved. At runtime that slot of the stack frame holds the function being called. For methods it is named `this` instead, which is how `this` is found like any other local variable.
+- `scopeDepth` starts at `0` for the top level script, where variables are globals, and `1` for anything inside of a function, where variables are locals.
+- The new function object is **pushed onto the VM's stack** right after it is created. The [garbage collector](https://olinat.net/docs/system-design/markSweep) can run any time we allocate, and nothing else points at this function yet, so it could be collected halfway through being compiled. Putting it on the stack makes it reachable. It is the same trick as the `push` and `pop` in `addConstant()`, and it gets popped again as soon as the function is finished compiling.
+- Finally, the function's name goes into the type checker's symbol table, so that the body of the function can call itself (recursion).
+
+```c++
+static ObjFunction* endFunctionCompiler(AstCompiler* compiler, ASTparser* parser, Vm* vm)
+{
+    ObjFunction* function = compiler->function;
+    if (function->returnType != VALUE_EMPTY)
+    {
+        emitByte(OP_MISSING_RETURN, &function->chunk, parser, vm);
+    }
+    emitReturn(&function->chunk, parser, vm);
+    return function;
+}
+```
+*Found in /src/ASTcompiler.c*
+
+Once the body of a function is compiled, we cap it off. If the function returns something (anything other than `empty`), we first emit an `OP_MISSING_RETURN`. This is how the rule that "every function must return" gets enforced. It is a tripwire at the very end of the function. A real `return` leaves the function before it ever gets there, but if the VM does run into it, it stops with a `MISSING RETURN ERROR`. Since this is a runtime check, a path that is missing a return is only caught if that path actually runs. After that, we always emit a normal return, which is how `empty` functions end. <br />
+
+Now closures. A closure is a function that uses a variable from the function around it. Figuring that out is the job of these two functions:
+
+```c++
+int resolveUpvalue(AstCompiler* compiler, const char* name, int length)
+{
+    if (compiler->enclosing == NULL) return -1;
+
+    //look for that local in the enclosing scope, searching from top down
+    for (int i = compiler->enclosing->localCount - 1; i >= 0; i--)
+    {
+        //get the local in said scope, and compare it to see if it matches
+        Local* local = &compiler->enclosing->locals[i];
+        if (local->length == length && memcmp(local->name, name, length) == 0)
+        {
+            local->isCaptured = true;
+            return addUpValue(compiler, i, true);
+        }
+    }
+
+    int upvalue = resolveUpvalue(compiler->enclosing, name, length);
+    if (upvalue != -1) return addUpValue(compiler, upvalue, false);
+    return -1;
+
+}
+
+int addUpValue(AstCompiler* compiler, int index, bool isLocal)
+{
+    int count = compiler->function->upValueCount;
+    for (int i = 0; i < count; i++)
+    {
+        //check to see if it is already captured, and then just return that
+        if (compiler->upvalues[i].index == index && compiler->upvalues[i].isLocal == isLocal)
+        {
+            return i;
+        }
+    }
+
+    //set up the new upval at that count
+    compiler->upvalues[count].index = index;
+    compiler->upvalues[count].isLocal = isLocal;
+    return compiler->function->upValueCount++;
+}
+```
+*Found in /src/ASTcompiler.c*
+
+I'll keep this one light. When a function uses a name that isn't one of its own locals, we search outward. We look through the locals of the `enclosing` compiler, and if we find a match, we mark that local as `isCaptured` (which is what makes `endScope()` emit `OP_CLOSE_UPVALUE` instead of `OP_POP`) and record an **upvalue** for it. If it isn't there, we ask the enclosing compiler to do the same search through *its* enclosing compiler, and so on, so a variable can be captured through several layers of functions. `addUpValue()` checks if this variable was already captured by this function, and if so, it reuses it. <br />
+
+Funnily enough, these functions live here, but they are actually called by the [bytecode compiler](https://olinat.net/docs/system-design/bytecodeCompiler) whenever it compiles a variable. It looks for a local first, then an upvalue, and finally falls back to a global. <br />
+
+Once the function body is done, `functionDeclaration()` emits the function as a constant, followed by `OP_CLOSURE`, followed by a pair of bytes for every upvalue: whether the variable was a local of the enclosing function (`isLocal`) and its `index`. The VM reads those pairs to hook the closure up to its variables at runtime. See [Functions & Natives](https://olinat.net/docs/system-design/functions) for the whole story.
+
+# Classes
+
+```c++
+    consume(T_LEFT_BRACE, "A class body was expected after a new class declaration, please use '{'.", "SYNTAX ERROR", parser);
+    while (!check(T_RIGHT_BRACE, parser) && !check(T_EOF, parser))
+    {
+        if (match(T_MAKE, parser))
+        {
+            //consume the identifer
+            ValueType type = getVarDeclarationType(parser, checker);
+            consume(T_IDENTIFIER, "Even inner class methods or fields have feelings, have some heart and give them a name.", "SYNTAX ERROR", parser);
+            const char* name = parser->previous.lexemeStart;
+            int nameLength = parser->previous.length;
+
+            if (check(T_LEFT_PAREN, parser))
+            {
+                 //method dispatch the call to append a new method to the class
+                functionDeclaration(parser, checker, compiler, vm, type, true);
+
+                //after function gets declared and is on top of stack in bytecode, you add in the class method opcode to
+                //make sure that that closure gets attached over to the class
+                ObjString* methodName = copyString(name, nameLength, vm);
+                uint8_t nameIndex = addConstant(&compiler->function->chunk, CREATE_OBJECT_VAL((Obj*)methodName), vm);
+
+                //check for constructor
+                if (strncmp(name, checker->currentClassName, checker->currentClassNameLength) == 0)
+                {
+                    //constructor has been found
+                    emitByte(OP_CONSTRUCTOR, &compiler->function->chunk, parser, vm);
+                }
+                else
+                {
+                    //regular class method
+                    emitByte(OP_CLASS_METHOD, &compiler->function->chunk, parser, vm);
+                    emitByte(nameIndex, &compiler->function->chunk, parser, vm);
+                }
+            }
+            else
+            {
+                //... it's a field: compile its initializer (or OP_FIELD_DEFAULT), then OP_CLASS_FIELD
+            }
+        }
+        //...
+    }
+```
+*Found in /src/ASTcompiler.c (trimmed, inside classDeclaration())*
+
+A class doesn't compile into some special structure. It compiles into a **series of instructions that build the class at runtime**, one piece at a time, and the order they get emitted in matters: <br />
+
+1. `OP_CLASS`, with the name of the class, creates an empty class on the stack.
+2. If there is a `->`, we push the superclass and emit `OP_INHERIT`, which copies the parent's methods into the new class and links the two together.
+3. Then every member in the body gets emitted, which is the loop above.
+4. Finally, `OP_DEFINE_GLOBAL` binds the finished class to its name.
+
+For the members, a **method** is really just a function, so we reuse `functionDeclaration()` with `isMethod` set to `true`, which is what reserves slot `0` for `this`. That leaves the compiled closure on the stack, and then `OP_CLASS_METHOD` attaches it to the class by name. If the method's name matches the name of the class, it is the constructor, and we emit `OP_CONSTRUCTOR` instead. A **field** compiles its initializer value if there is one, or `OP_FIELD_DEFAULT` for the type if there isn't (fields don't need an initial value), and then `OP_CLASS_FIELD` records the name and type of it on the class. <br />
+
+One more thing you can see in `classDeclaration()` is that it sets `checker->currentClassName` while the body is being compiled and clears it afterwards. That is how the type checker knows which class a `this` refers to. If you want to see what the classes look like from the language side, see [Defining a Class](https://olinat.net/docs/guides/classes), [Constructors](https://olinat.net/docs/guides/constructors), and [Class Instances](https://olinat.net/docs/guides/instances).
+
+# #pullf and Natives
+
+```c++
+static void nativeFunction(ASTparser* parser, TypeChecker* checker, AstCompiler* compiler, Vm* vm)
+{
+    //check the type of native
+    consume(T_IDENTIFIER, "You have to list the name of the library you wish to include.", "SYNTAX ERROR", parser);
+    const char* library = parser->previous.lexemeStart;
+    int length = parser->previous.length;
+
+    if (strncmp(library, "stdlib", length) == 0)
+    {
+        registerIONatives(vm);
+        registerMathNatives(vm);
+        registerRandomNatives(vm);
+        registerTimeNatives(vm);
+        registerFileIONatives(vm);
+        registerTypeNatives(vm);
+        registerUtilsNatives(vm);
+        registerStringNatives(vm);
+
+        registerIOSymbols(checker, parser, vm);
+        registerMathSymbols(checker, parser, vm);
+        registerRandomSymbols(checker, parser, vm);
+        registerTimeSymbols(checker, parser, vm);
+        registerFileIOSymbols(checker, parser, vm);
+        registerTypeSymbols(checker, parser, vm);
+        registerUtilsSymbols(checker, parser, vm);
+        registerStringSymbols(checker, parser, vm);
+    }
+    else if (strncmp(library, "io", length) == 0) //print & output functions
+    {
+        registerIONatives(vm);
+        registerIOSymbols(checker, parser, vm);
+    }
+    //... one branch for every library
+    else
+    {
+        error("Unknown library name.", "IMPORT ERROR", parser);
+    }
+}
+```
+*Found in /src/ASTcompiler.c (trimmed)*
+
+This is what runs when you write `#pullf` at the top of your program. It reads the name of the library, and then **registers it twice**, which is what you can see in the `stdlib` branch: <br />
+
+- `registerXNatives()` hands the VM the actual C functions, so they can be called at runtime.
+- `registerXSymbols()` tells the type checker each function's name, parameter types, and return type, so that calls to them can be type checked.
+
+Libraries are opt-in, so if you never pull one in, neither of those happen, and calling one of its functions is an error because nobody has ever heard of it. `#pullf stdlib` is just shorthand for pulling in every library. For the full list of libraries, see the [Standard Library Overview](https://olinat.net/docs/stdlib/overview), and for how the natives work once they are registered, see [Functions & Natives](https://olinat.net/docs/system-design/functions).
+
+# The Two Pass Compile
+
+```c++
+ObjFunction* compile(const char* source, Vm* vm)
+{
+    //set up the parser and essentially the scanner
+    ASTparser parser;
+    initParser(&parser, source);
+
+    //second parser for the first pass through looking for declarations of classes and functions
+    ASTparser parser2;
+    initParser(&parser2, source);
+
+    TypeChecker checker;
+    initTypeChecker(&checker);
+
+    //----------------------------First pass--------------------//
+    while (!check(T_EOF, &parser2))
+    {
+        declareFunction(&parser2, &checker, vm );
+    }
+    if (parser2.hadError) return NULL;
+
+#ifdef DEBUG_TRACE_EXECUTION
+    printf("RAN PAST FIRST COMPILATION\n");
+#endif
+
+    //----------------------------Second pass--------------------//
+    AstCompiler compiler;
+    initFunctionCompiler(&compiler, NULL, "<script>", 8, VALUE_EMPTY, true, false, vm, &checker, &parser);
+
+    while (!check(T_EOF, &parser))
+    {
+        declaration(&parser, &checker, &compiler, vm );
+    }
+
+
+    ObjFunction* topScript = endFunctionCompiler(&compiler, &parser, vm);
+    pop(vm); //pop the top level script off the stack since gc no longer needs it
+
+    //free all of the temp functions make in type checker
+    freeTypeChecker(&checker);
+
+    //emitReturn(&vm->chunk, &parser);
+    return (parser.hadError || checker.hadError) ? NULL : topScript;
+}
+```
+*Found in /src/ASTcompiler.c*
+
+This is the function that runs the whole thing, and it reads your source code **twice**. There are two parsers, `parser` and `parser2`, each with their own scanner starting at the beginning of the **same** source string. The first pass uses `parser2`, and it is a quick skim through the file using `declareFunction()`. For every function, it writes down the name, parameter types, and return type. For every class, it writes down the fields and method signatures. And for every `#pullf`, it registers the library's symbols. Everything else gets skipped. <br />
+
+Then the real second pass runs, and it is the full compile that has been described this whole page. Notice that the top level program is compiled as a function too, one called `<script>`. <br />
+
+The payoff of that first pass is big. It is what lets a function call another function that is written *further down* the file, because by the time the type checker reaches the call, the signature is already known. It is also why a class knows all of its fields before any of its methods are compiled. Without it, you would have to declare everything before you use it, like old C. At the end we free the temporary functions that the first pass made, and if either pass hit an error, we return `NULL` so that nothing runs.
+
+```c++
+            //skip over the body
+            if (check(T_LEFT_BRACE, parser))
+            {
+                int braceCount = 1;
+                consume(T_LEFT_BRACE, "", "", parser);
+                while (braceCount > 0 && !check(T_EOF, parser))
+                {
+                    if (match(T_LEFT_BRACE, parser)) braceCount++;
+                    else if (match(T_RIGHT_BRACE, parser)) braceCount--;
+                    else advance(parser);
+                }
+            }
+```
+*Found in /src/ASTcompiler.c (trimmed, inside declareFunction())*
+
+Since the first pass only cares about the signature, it needs a way to skip over the **body** of a function without parsing it. The trick is to count braces. We start at `1` after the opening `{`, add one for every `{` we see, subtract one for every `}`, and when it gets back to `0` we have found the `}` that closes the function. Because we are counting *tokens* and not characters, a `}` inside of a string or a comment can't throw it off, since the scanner already turned those into a string token or threw them away.
+
+# Error Handling
+
+```c++
+void errorAt(Token* token, const char* message, const char* messageType, ASTparser* parser)
+{
+    if (parser->panicMode) return; //skip if error already detected
+
+    fprintf(stderr, ":>>  %s -- [line %d", messageType, token->line);
+
+    if (token->type == T_EOF)
+    {
+        fprintf(stderr, " at end");
+    }
+    else if (token->type == T_ERROR)
+    {
+        //nothing
+    }
+    else
+    {
+        //print out erroring code
+        fprintf(stderr, " at '%.*s'", token->length, token->lexemeStart);
+    }
+
+    fprintf(stderr, ": %s]\n", message);
+    parser->hadError = true;
+    parser->panicMode = true;
+}
+```
+*Found in /src/ASTcompiler.c*
+
+Every compile time error in Oli-Nat comes through this function, and it is where that `:>>` format you have seen comes from. It prints the type of error, the line, the token it happened at, and the message, like this:
+
+```
+:>>  SYNTAX ERROR -- [line 3 at 'println': Expected ';' after you declare a new variable]
+```
+
+Then it sets two flags. `hadError` makes sure the compile returns `NULL` so the program never runs, and `panicMode` is the clever one. While we are in panic mode, `errorAt()` returns immediately at the very top, so every error after the first one gets ignored. Without that, a single typo would cause a whole cascade of false errors, because the parser is confused about where it is. <br />
+
+There are also two small helpers that call it, `error()` which reports at the `previous` token, and `errorAtCurrent()` which reports at the `current` one.
+
+```c++
+void consume(TokenType type, const char* message, const char* messageType, ASTparser* parser)
+{
+    if (parser->current.type == type)
+    {
+        advance(parser);
+        return;
+    }
+    errorAtCurrent(message, messageType, parser);
+}
+```
+*Found in /src/ASTcompiler.c*
+
+My personal favorite function in the whole compiler, and one of the smallest. It says "the next token had better be this one". If it is, we `advance()` past it and carry on, and if it isn't, we report whatever error message we were given. That is it. Most of the `SYNTAX ERROR`s you will ever see in Oli-Nat are a `consume()` that didn't find what it was looking for, and every one of those little messages with personality is just the string that was passed into it. <br />
+
+*Cool Note:* Look at the error example above. The missing `;` was at the end of line 2, but the error says line 3, at `println`. That is because `consume()` checks the **current** token, which is the first token that didn't fit, and not the one before it. It is a common quirk of this style of parser.
+
+```c++
+static void synchronize(ASTparser* parser)
+{
+    parser->panicMode = false;
+    while (parser->current.type != T_EOF)
+    {
+        //check if there is a semi colon
+        if (parser->previous.type == T_SEMICOLON) return;
+
+        //start a new declaration, find a new place to start parsing
+        switch (parser->current.type)
+        {
+            case T_CLASS:
+            case T_MAKE:
+            case T_FOR:
+            case T_IF:
+            case T_WHILE:
+            case T_RETURN:
+            case T_HASH_PULLF:
+                return;
+            default:
+                break;
+        }
+        advance(parser);
+    }
+}
+```
+*Found in /src/ASTcompiler.c*
+
+This is how we recover from an error. After an error, the parser is in panic mode and doesn't really know where it is. So `synchronize()` first turns panic mode off, and then throws tokens away until it reaches somewhere that is probably the start of a new statement. That is either right after a `;`, or when the next token is a keyword that starts a statement, like `make`, `if`, or `class`. Then parsing picks up again from there. <br />
+
+The result is that one typo doesn't turn into forty errors, and if you have two separate mistakes in your program, you can get both of them reported in the same run.
+
+# Where to Go Next
+
+And that is the AST compiler! It reads tokens and builds trees, and it conducts the whole pipeline while it does, but it doesn't decide whether those trees actually make sense, or what they turn into. The next stop is the [Type Checker](https://olinat.net/docs/system-design/typeChecker), which takes the trees from this page and decides if the types in them all line up. After that, the [ByteCode Compiler](https://olinat.net/docs/system-design/bytecodeCompiler) turns the approved trees into the instructions the VM runs. Good job on getting through the largest doc file out of all of them. This is the peak, it gets a lot easier from here, I swear!

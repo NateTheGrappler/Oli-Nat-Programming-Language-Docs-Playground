@@ -5,7 +5,10 @@
     padding: 1rem;
     box-sizing: border-box;
     overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #f1a25c #14161A;
 }
+    
 
 .doc-content {
     max-width: 1080px;
