@@ -1,0 +1,878 @@
+# Type Checker
+
+Alright, so we have trees now. The AST compiler spent all of that effort building them, but so far nothing has actually asked whether they make any sense. `1 + "hello"` is a perfectly good tree, it just isn't a perfectly good *program*. That is where the type checker comes in. <br />
+
+The type checker is what makes Oli-Nat a **statically typed** language. It walks through every tree that the [AST compiler](https://olinat.net/docs/system-design/astCompiler) builds and works out the type of each piece of it, and if anything doesn't line up, the program stops with an error **before a single line of it ever runs**. It is also one of the smaller parts of the pipeline, about 1100 lines, and roughly a fifth of that is just a list of standard library functions. <br />
+
+Remember `expressionStatement()` from the AST Compiler page? Every expression gets passed to the type checker right after it is built, and the type that comes back decides whether we go on to compile it. <br />
+
+This page is split into three parts, going from easiest to hardest. First, how a tree gets checked. Second, the symbol table, which is how the checker remembers things. And third, how that same table is used for functions, native functions, and classes. <br />
+
+Before that though, here are the types themselves. Everything in the checker is built on this one enum:
+
+```c++
+typedef enum {
+    //basic
+    VALUE_BOOL,
+    VALUE_INT,
+    VALUE_STRING,
+    VALUE_OBJECT,
+    VALUE_DOUBLE,
+    VALUE_FLOAT,
+    VALUE_CLASS,
+    VALUE_INSTANCE,
+    VALUE_EMPTY,
+    //arrays
+    VALUE_BOOL_ARRAY,
+    VALUE_INT_ARRAY,
+    VALUE_STRING_ARRAY,
+    VALUE_OBJECT_ARRAY,
+    VALUE_DOUBLE_ARRAY,
+    VALUE_FLOAT_ARRAY,
+    VALUE_EMPTY_ARRAY,
+    //error
+    VALUE_ERROR,
+    //For maybe auto keyword in future, but only for native fns rn
+    VALUE_ANY,
+    VALUE_ANY_NUM,
+    VALUE_ANY_ARRAY
+} ValueType;
+```
+*Found in /include/common.h*
+
+You have seen most of these already. There are the basic types, the array version of each one, and `VALUE_CLASS` and `VALUE_INSTANCE`, which we will get to at the end. `VALUE_ERROR` is the checker's way of saying "this expression is broken". The three `VALUE_ANY` types at the bottom are special, and only exist for native functions. They are explained in part three.
+
+# Checking Expressions
+
+The whole job of the checker comes down to one function, `checkExpression()`. You give it a tree, and it gives you back the **type** that the tree evaluates to (or `VALUE_ERROR` if something is wrong). Here is the front of it:
+
+```c++
+ValueType checkExpression(TypeChecker* checker, Expr* expr, ASTparser* parser)
+{
+    //...
+    if (expr == NULL) return VALUE_ERROR;
+
+
+    ValueType result;
+    switch (expr->type)
+    {
+        case EXPR_BINARY:
+        {
+            result = checkBinary(checker, expr, parser);
+            break;
+        }
+        case EXPR_LITERAL:
+        {
+            result = checkLiteral(expr);
+            break;
+        }
+        case EXPR_UNARY:
+        {
+            if (expr->unary.right == NULL)
+            {
+                return VALUE_ERROR;
+            }
+            result = checkUnary(checker, expr, parser);
+            break;
+        }
+        case EXPR_GROUPING:
+        {
+            result = checkGrouping(checker, expr, parser);
+            break;
+        }
+        case EXPR_VARIABLE:
+        {
+            result = checkVariable(checker, parser, expr);
+            break;
+        }
+        //...
+```
+*Found in /src/typeChecker.c (trimmed)*
+
+It is a big `switch` on the `type` of the expression, the same enum you saw on the AST page. Each case looks at one kind of node and decides what it evaluates to. Some cases are small enough to live right inside of the switch, and others call a helper function. <br />
+
+The part that makes this work is **recursion**. To know the type of a node, we first need to know the type of everything underneath it, so every check calls `checkExpression()` on its children and then combines the answers. Types bubble up from the leaves of the tree to the root, which is the same order that the tree gets evaluated in. Let's start at the leaves:
+
+```c++
+ValueType checkLiteral(Expr* expr)
+{
+    //just return the already determined type
+    return expr->literal.type;
+}
+
+ValueType checkGrouping(TypeChecker* checker, Expr* expr, ASTparser* parser)
+{
+    //just pass it forward
+    return checkExpression(checker, expr->grouping.expr, parser);
+}
+ValueType checkUnary(TypeChecker* checker, Expr* expr, ASTparser* parser)
+{
+    ValueType typeRight = checkExpression(checker, expr->unary.right, parser);
+
+    //handle unary cases based on their operator
+    switch (expr->unary.operator)
+    {
+        case '-':
+        {
+            //check for right operand and then return an error if it's wrong
+            if (isNumeric(typeRight)) { return typeRight; }
+            typeError(checker, parser, expr, "When trying to negate a value, please use a number.", "TYPE ERROR"); //toss error if not number
+
+            return VALUE_ERROR;
+        }
+        case '!':
+        {
+            if (typeRight == VALUE_BOOL) { return typeRight; }
+            typeError(checker, parser, expr, "Operator '!' only works on boolean values man!" , "TYPE ERROR");
+            return VALUE_ERROR;
+        }
+        default:
+        {
+            typeError(checker, parser, expr, "Unknown unary expression syntax, what are you doing?", "TYPE ERROR");
+            return VALUE_ERROR;
+        }
+    }
+}
+```
+*Found in /src/typeChecker.c*
+
+`checkLiteral()` is the base case, it doesn't recurse at all. Remember `number()` from the AST compiler? The literal was created with its type already attached (`createLiteralInt`, `createLiteralDouble`), so all the checker has to do is read it back. `checkGrouping()` just passes things along, since `(x)` has the same type as `x`. <br />
+
+`checkUnary()` is the first one that recurses. It checks the expression on its right, and then looks at the operator. A `-` only works on numbers and gives back the same type it was given, and a `!` only works on booleans. Anything else is an error, and we return `VALUE_ERROR`. (A fun little detail is that unary operators are stored as a single `char`, where binary operators are whole strings.) <br />
+
+Now for the beefy boy:
+
+```c++
+ValueType checkBinary(TypeChecker* checker, Expr* expr, ASTparser* parser)
+{
+    ValueType rightType = checkExpression(checker, expr->binary.right, parser);
+    ValueType leftType = checkExpression(checker, expr->binary.left, parser);
+    const char* operator = expr->binary.operator; //it's a 2 char array so it's 2 bytes
+
+    //do the arithemtiatic expressions first
+    if (strcmp(operator, "+") == 0 ||
+        strcmp(operator, "-") == 0 ||
+        strcmp(operator, "/") == 0 ||
+        strcmp(operator, "*") == 0 )
+    {
+        if (isNumeric(leftType) && isNumeric(rightType)) return checkBinaryReturnType(rightType, leftType); //somehow handle different expression outputs
+        if (strcmp(operator, "+") == 0 && rightType == VALUE_STRING && leftType == VALUE_STRING) { return VALUE_STRING; }
+
+        typeError(checker, parser, expr, "If you want to do math, you have to use numbers (double, float, int), please." , "TYPE ERROR");
+        return VALUE_ERROR;
+    }
+
+    //handle arithemtitec boolean operators
+    if (strcmp(operator, "<") == 0 ||
+        strcmp(operator, ">") == 0 ||
+        strcmp(operator, "<=") == 0 ||
+        strcmp(operator, ">=") == 0 )
+    {
+        if (isNumeric(leftType) && isNumeric(rightType)) return VALUE_BOOL; //always a boolean
+        typeError(checker, parser, expr, "Operators comparing value must compare numbers only.", "TYPE ERROR"); //TODO: maybe add checking strings too idk
+        return VALUE_ERROR;
+    }
+
+    //handle equality operator
+    if (strcmp(operator, "==") == 0 || strcmp(operator, "!=") == 0)
+    {
+        if (leftType == rightType) return VALUE_BOOL;
+        if (isNumeric(leftType) && isNumeric(rightType)) return VALUE_BOOL;
+        typeError(checker, parser, expr, "Operators comparing value must compare numbers, booleans, or strings, you cannot mix types (sorry)." , "TYPE ERROR"); //TODO: maybe add checking strings too idk
+        return VALUE_ERROR;
+    }
+
+    //unreachable (HOPEFULLY)
+    typeError(checker, parser, expr, "Unknown binary operator, what on earth are you doing?", "TYPE ERROR");
+    return VALUE_ERROR;
+
+}
+```
+*Found in /src/typeChecker.c*
+
+`checkBinary()` checks both sides first, and then looks at the operator, using `strcmp`. This is where storing the operator as a string back on the AST page pays off. There are three families of operators: <br />
+
+- **Arithmetic** (`+ - * /`): both sides have to be numbers, and the type of the result comes from `checkBinaryReturnType()` below. The one exception is `+`, which can also join two strings together.
+- **Comparison** (`< > <= >=`): both sides have to be numbers, and the result is always a `bool`.
+- **Equality** (`== !=`): both sides have to be the same type, or both be numbers. The result is always a `bool`.
+
+```c++
+static ValueType checkBinaryReturnType(ValueType right, ValueType left)
+{
+    //return same types, then float piority, otherwise it has to be a double
+    if (right == left) return right;
+    if ((right == VALUE_FLOAT && left == VALUE_INT) || (left == VALUE_FLOAT && right == VALUE_INT)) return VALUE_FLOAT;
+    return VALUE_DOUBLE;
+}
+```
+*Found in /src/typeChecker.c*
+
+This is Oli-Nat's type promotion; if both sides are the same type, we get that type back, so `int + int` is an `int`. (That includes `5 / 2`, which is `2` and not `2.5`.) An `int` mixed with a `float` gives a `float`, and anything else has to involve a `double`, so we get a `double`. That makes `1 + 2.5` a `3.5`. <br />
+
+*Cool Note:* Promotion only happens **inside** of an expression. When it comes to declaring or assigning a variable, the type has to match *exactly*, so `make int x = 1 + 2.5;` is an error, because `1 + 2.5` is a double and `x` is an int. <br />
+
+Now what happens when something does not line up? We call `typeError()`:
+
+```c++
+static void typeError(TypeChecker* checker, ASTparser* parser, Expr* expr, const char* message, const char* messageType)
+{
+    if (parser->panicMode) return;
+
+    fprintf(stderr, ":>>  | %s | at line %d: %s] \n", messageType, expr->line, message);
+    checker->hadError = true;
+    checker->errorCount++;
+
+    parser->hadError = true;
+    parser->panicMode = true;
+}
+```
+*Found in /src/typeChecker.c*
+
+It prints the error, using the line number that every node stores (this is why each `Expr` has a `line`), and sets `hadError` so the program never gets to run. Just like on the AST page, it also sets `panicMode`, and here it is doing something really useful. When a child comes back as `VALUE_ERROR`, its parent can't make sense of it either, and would happily report a second, nonsense error on top of the first one. `panicMode` swallows everything after the first error, so bogus errors aren't shown to the user, scaring them off or annoying them. Here is what any given one error looks like:
+
+```
+:>>  | TYPE ERROR | at line 2: If you want to do math, you have to use numbers (double, float, int), please.]
+```
+
+Arrays follow the same pattern. The type of an array like `[1, 2, 3]` is worked out from its first element, and every other element has to match it:
+
+```c++
+            ValueType inferType = checkExpression(checker, expr->staticArray.values[0], parser);
+            if (inferType == VALUE_ERROR) {result = VALUE_ERROR; break;}
+
+            //check through all latter elements
+            bool typeError = false;
+            for (int i = 1; i < expr->staticArray.length; i++)
+            {
+                ValueType t = checkExpression(checker, expr->staticArray.values[i], parser);
+                if (t != inferType || t == VALUE_ERROR)
+                {
+                    error("All array elements must be the same type.", "TYPE MISMATCH ERROR", parser);
+                    typeError = true;
+                }
+            }
+            if (!typeError)
+            {
+                expr->staticArray.type = inferType;
+                result = toArrayType(inferType);
+            }
+```
+*Found in /src/typeChecker.c*
+
+The result is the array version of that type, so `[1, 2, 3]` is an `int[]`. Indexing into an array needs an `int`, and `&&` and `||` need a `bool` on both sides, in the same way. <br />
+
+There is one case that we skipped, `EXPR_VARIABLE`. All the tree gives us for a variable is its *name*, like `x`. Nothing about the tree says what type `x` is. So where does the checker find out? That is what the symbol table is for.
+
+# The Symbol Table
+
+Here is the problem. The AST compiler builds, and the type checker checks, **one expression at a time**, and then the tree gets freed. By the time we get to `x + 1`, the tree for `make int x = 5;` is long gone. <br />
+
+So the checker has to remember. It keeps a **symbol table**, which is a list of every name that the program has declared so far, along with what each of them is. Anything that has to outlive a single expression lives in here.
+
+```c++
+typedef struct
+{
+    const char* name;
+    int length;
+    ValueType   type;
+    int depth;
+
+    //for actual functions and the temp for native initialization
+    ObjFunction* function;
+    bool isTemp;
+
+    //for classes
+    const char* className;
+    int classNameLength;
+    const char* superClassName;
+    int superClassNameLength;
+
+    //for class instances
+    CheckerFieldInfo* fieldsInfo;
+    int fieldCount;
+    int fieldCapacity;
+
+    //for class methods
+    CheckerMethodInfo* methodInfo;
+    int methodCount;
+    int methodCapcaity;
+} Symbol;
+```
+*Found in /src/typeChecker.h*
+
+```c++
+typedef struct
+{
+    bool hadError;
+    int errorCount;
+    Symbol symbols[MAX_SYMBOLS];
+    int varCount;
+
+    const char* lastClassName;
+    int lastClassNameLength;
+    const char* currentClassName;
+    int currentClassNameLength;
+} TypeChecker;
+```
+*Found in /src/typeChecker.h*
+
+A `Symbol` is one entry in the table. The basics are the `name`, the `type`, and the `depth`, which is how deep in scopes it was declared (the same idea as on the `Local` struct from the AST page). Everything else is extra information for functions, classes, and instances, and we will get to those in part three. <br />
+
+The `TypeChecker` struct holds the table itself, which is just a flat array of symbols with a count, `varCount`. It is capped at `MAX_SYMBOLS` (4096). It also holds the error flags, and a couple of class names that we will see later on. <br />
+
+There are really only two operations on the table:
+
+```c++
+Symbol* lookUpSymbol(TypeChecker* checker, const char* name, int length)
+{
+    for (int i = checker->varCount - 1; i >= 0; i--)
+    {
+        if (checker->symbols[i].length == length &&
+            memcmp(checker->symbols[i].name, name, length) == 0)
+            return &checker->symbols[i];
+    }
+    return NULL;
+}
+```
+*Found in /src/typeChecker.c (trimmed)*
+
+```c++
+void addSymbol(TypeChecker* checker, const char* name, int length, int depth, ValueType type, ObjFunction* function, ASTparser* parser)
+{
+    if (checker->varCount >= MAX_SYMBOLS)
+    {
+        error("Too many variables have been declared.", "MEMORY ERROR", parser);
+        return;
+    }
+    int index = checker->varCount++;
+    checker->symbols[index].type = type;
+    checker->symbols[index].name = name;
+    checker->symbols[index].length = length;
+    checker->symbols[index].depth = depth;
+    checker->symbols[index].function = function;
+    checker->symbols[index].isTemp = false;
+    checker->symbols[index].className = NULL;
+    checker->symbols[index].classNameLength = 0;
+    checker->symbols[index].superClassName = NULL;
+    checker->symbols[index].superClassNameLength = 0;
+    checker->symbols[index].fieldsInfo = NULL;
+    checker->symbols[index].fieldCount = 0;
+    checker->symbols[index].fieldCapacity = 0;
+    checker->symbols[index].methodInfo = NULL;
+    checker->symbols[index].methodCount = 0;
+    checker->symbols[index].methodCapcaity = 0;
+}
+```
+*Found in /src/typeChecker.c*
+
+`addSymbol()` pushes a new symbol onto the end of the array, and `lookUpSymbol()` searches the array **backwards**, from the newest symbol to the oldest. That makes the table basically a stack with a linear search. Searching newest first is what makes shadowing work. So basically the same way we have it set up in the ASTCompiler with the compiler struct. If an inner scope declares a new `x`, it is the newest entry, so it gets found first, and the outer `x` is left untouched underneath it. This code prints `inner` and then `2`:
+
+```java
+make int x = 1;
+{
+    make string x = "inner";
+    println(x);
+}
+println(x + 1);
+```
+
+Now, a linear search is technically not the fastest way we can look up symbols, a hashmap is. However, a direct linear search is very simple to implement for one, and God knows I was out of my mind writing this so it helped, but keep in mind all of this also happens during compilation. Hence a linear search here does not outright hurt the actual performance of the language, only the time it takes to compile. <br />
+
+Now we can finish the `EXPR_VARIABLE` case from before:
+
+```c++
+ValueType checkVariable(TypeChecker* checker, ASTparser* parser, Expr* expr)
+{
+    Symbol* symbol = lookUpSymbol(checker, expr->variable.name, expr->variable.length);
+    if (symbol != NULL)
+    {
+        return symbol->type;
+    }
+    typeError(checker, parser, expr, "Undefined variable.", "UNDEFINED ERROR");
+    return VALUE_ERROR;
+}
+```
+*Found in /src/typeChecker.c*
+
+`checkVariable()` is about as simple as it gets. Look up the name, and give back the type that is stored there, or report an `UNDEFINED ERROR` if it was never declared. Assigning to a variable is only slightly more work. We look it up, check the type of the new value, and the two have to match exactly:
+
+```c++
+        case EXPR_ASSIGN:
+        {
+            Symbol* symbol = lookUpSymbol(checker, expr->var_assignment.name, expr->var_assignment.length);
+            if (symbol == NULL)
+            {
+                typeError(checker, parser,  expr, "You cannot try to reassign a var that does not exist, no having your cake and eating it.", "UNDEFINED ERROR");
+                return VALUE_ERROR;
+            }
+            ValueType type = checkExpression(checker, expr->var_assignment.value, parser);
+            if (type != symbol->type)
+            {
+                typeError(checker, parser, expr, "You cannot try to give a different type to an existing variable!", "TYPE MISTMATCH ERROR");
+                return VALUE_ERROR;
+            }
+            result = symbol->type;
+            break;
+        }
+```
+*Found in /src/typeChecker.c*
+
+So who is putting all of these symbols in the table? The checker owns it, but it is the AST compiler that writes to it. `varDeclaration()` adds every variable (globals at depth `0`, locals at whatever depth they are declared at), `functionDeclaration()` adds the parameters of a function, the first pass adds functions and classes, and `#pullf` adds natives. <br />
+
+And who takes them back out? When a scope ends, `endScope()` pops the symbols too:
+
+```c++
+    //pop in tandem with symbol table
+    while (checker->varCount > 0 &&
+       checker->symbols[checker->varCount - 1].depth > compiler->scopeDepth)
+    {
+        checker->varCount--;
+    }
+```
+*Found in /src/ASTcompiler.c (trimmed, inside endScope())*
+
+Anything that was declared deeper than the scope we are returning to just gets popped off the end by lowering `varCount`. Nothing is freed, the entries are simply forgotten, which is exactly how a stack should behave. <br />
+
+It is the same job as the `locals` array in the `AstCompiler`, and the two are popped together on purpose (look at the comment, "pop in tandem"). They just answer different questions. The compiler's `locals` array knows **where a variable lives** (its slot on the stack), and the checker's symbol table knows **what it is** (its type). The bytecode compiler needs the first one, and the type checker needs the second.
+
+# Functions, Natives, and Classes
+
+So far a symbol has been a variable with a type. The same table also holds functions, native functions, and classes, which is what all of those extra fields on `Symbol` are for. This is where most of the type checker's code lives (the `EXPR_CALL` case alone is about 300 lines), but the idea is the same everywhere: look something up in the table, and then compare what you were given to what it says.
+
+## Functions
+
+A function is a symbol whose `function` field points at an `ObjFunction`, which is the very same object that the VM ends up running. The checker only cares about its **signature**: the `arity`, the `returnType`, and a list of `params`, each of which holds a type, a name, and whether it `isOptional`. <br />
+
+There is a catch though. The checker needs a function's signature when it sees a *call* to it, and that call could come before the function has been compiled, or even before it is declared. This is exactly what the first pass of the [two pass compile](https://olinat.net/docs/system-design/astCompiler) is for:
+
+```c++
+            //temp function
+            ObjFunction* functionDeclaration = newFunction(name, nameLength, type, vm);
+            push(vm, CREATE_OBJECT_VAL((Obj*)functionDeclaration)); //push for gc sake
+            functionDeclaration->arity = 0;
+            functionDeclaration->returnType = type;
+                    //...
+                    ParamInfo* param = &functionDeclaration->params[functionDeclaration->arity++];
+                    param->type = paramType;
+                    param->name = paramName;
+                    param->length = paramLength;
+            //...
+            //add to func symbol table
+            addSymbol(checker, name, nameLength, 0, type, functionDeclaration, parser);
+            pop(vm); //get off of stack
+```
+*Found in /src/ASTcompiler.c (trimmed, inside declareFunction())*
+
+During the first pass, `declareFunction()` reads only the signature of each function. It builds a temporary `ObjFunction` to hold it, and adds it to the symbol table, skipping the body. Then in the second pass, when the real function gets compiled, `functionDeclaration()` swaps the temporary signature out for the real one:
+
+```c++
+    Symbol* existingSymbol = lookUpSymbol(checker, name, nameLength);
+    if (existingSymbol) { existingSymbol->function = function; }  // Replace placeholder with real function
+```
+*Found in /src/ASTcompiler.c (trimmed, inside functionDeclaration())*
+
+The payoff is that a function can call another one declared further down the file, because by the time its body is being compiled, the checker already knows what the other function looks like. <br />
+
+*Cool Note:* That is only half of the story. The checker knowing about a function does not mean the VM has defined it yet, since the VM still defines functions in order as the program runs. So calling a function from the top level of your program, on a line before the one that defines it, still fails at runtime with an undefined global. Calls from inside of other functions are fine though, because those don't run until everything has been defined. <br />
+
+Now for actually checking a call. Calls are `EXPR_CALL` nodes, and this is how a plain function call goes:
+
+```c++
+            //------------plain function handling-------------//
+            Symbol* symbol = lookUpSymbol(checker, expr->objectCall.callee->variable.name, expr->objectCall.callee->variable.length);
+
+            //basic null check
+            if (symbol == NULL)
+            {
+                typeError(checker, parser, expr, "The object you are calling must be an existing function or class instance.", "UNDEFINED ERROR");
+                return VALUE_ERROR;
+            }
+            //...
+            //checking callee
+            if (symbol->function == NULL)
+            {
+                typeError(checker, parser, expr, "The object you are calling must be an existing function or class instance.", "UNDEFINED ERROR");
+                return VALUE_ERROR;
+            }
+            if (expr->objectCall.callee->type != EXPR_VARIABLE)
+            {
+                typeError(checker, parser, expr, "Callee must be a named function.", "TYPE ERROR");
+                return VALUE_ERROR;
+            }
+
+            //checking arg counts
+            int requiredCount = 0;
+            for (int i = 0; i < symbol->function->arity; i++)
+            {
+                if (!symbol->function->params[i].isOptional) requiredCount++;
+            }
+            if (expr->objectCall.argCount < requiredCount || expr->objectCall.argCount > symbol->function->arity)
+            {
+                typeError(checker, parser, expr, "Function call parameters amount does not match function definition.", "UNDEFINED ERROR");
+                return VALUE_ERROR;
+            }
+
+            //type checking args
+            for (int i = 0; i < expr->objectCall.argCount; i++)
+            {
+                ValueType argType = checkExpression(checker, expr->objectCall.args[i], parser);
+                if (symbol->function->params[i].type == VALUE_ANY) continue;
+                if (symbol->function->params[i].type == VALUE_ANY_NUM)
+                {
+                    if (!isNumeric(argType))
+                    {
+                        typeError(checker, parser, expr, "Please only input numeric arguements (int, float, double)", "TYPE ERROR");
+                        return VALUE_ERROR;
+                    }
+                    continue;
+                }
+                if (symbol->function->params[i].type == VALUE_ANY_ARRAY)
+                {
+                    if (!isArray(argType))
+                    {
+                        typeError(checker, parser, expr, "Please input an array as an arguement into this function.", "TYPE ERROR");
+                        return VALUE_ERROR;
+                    }
+                    continue;
+                }
+
+                if (argType != symbol->function->params[i].type)
+                {
+                    typeError(checker, parser, expr, "An arguement of differing type was found in function call. Please double check function input.", "TYPE ERROR");
+                    return VALUE_ERROR;
+                }
+            }
+
+            result = symbol->function->returnType;
+            break;
+```
+*Found in /src/typeChecker.c (trimmed)*
+
+First we look the name up, and if nothing is found, that is an `UNDEFINED ERROR`. (Trying to call something that isn't a function, like calling an `int` variable, ends up here too, since that symbol has no `function`.) <br />
+
+Then we check the **count**. Any parameter that isn't `isOptional` is required, so the number of arguments has to land between the number of required parameters and the total. After that we check each argument, by calling `checkExpression()` on it, which is the recursion again, and compare the result with the type that parameter expects. If it all matches, the type of the entire call is just the function's `returnType`. <br />
+
+You might have noticed the `VALUE_ANY` types sneaking into the middle of that check, and the three `continue`s that skip the exact comparison. Those are for the next section.
+
+## Natives
+
+Native functions are the standard library functions that are written in C, like `println` or `sqrt`. The type checker has no idea how a native works, and it doesn't need to. To the checker, a native is just a function with a name, some parameters, and a return type. So to type check natives, all we do is add a symbol for each one:
+
+```c++
+static void registerNativeSymbol(TypeChecker* checker, const char* name, int length, ValueType returnType, ParamInfo* params, int paramCount, ASTparser* parser, struct Vm* vm)
+{
+    // create a dummy ObjFunction just to hold the signature
+    ObjFunction* sig = calloc(1, sizeof(ObjFunction));
+    sig->returnType = returnType;
+    sig->arity = paramCount;
+    for (int i = 0; i < paramCount; i++)
+    {
+        sig->params[i] = params[i];
+    }
+    addSymbol(checker, name, length, 0, returnType, sig, parser);
+    checker->symbols[checker->varCount - 1].isTemp = true; //for freeing later so no memory leaks out
+}
+```
+*Found in /src/typeChecker.c*
+
+We make a dummy `ObjFunction` just to hold the signature (with plain `calloc`, since it is not a real VM object and never gets run), fill it in, and add it to the table at depth `0`. The `isTemp` flag lets `freeTypeChecker()` know to free it once compiling is done. <br />
+
+Every library has a function like this one that registers all of its functions in bulk:
+
+```c++
+void registerIOSymbols(TypeChecker* checker, struct ASTparser* parser, struct Vm* vm)
+{
+    //print(ANY msg) -> void
+    ParamInfo printParams[1];
+    printParams[0].type = VALUE_ANY;
+    printParams[0].name = "msg";
+    printParams[0].length = 3;
+    registerNativeSymbol(checker, "print", 5, VALUE_EMPTY, printParams, 1, parser, vm);
+
+    //println(ANY msg) -> void
+    ParamInfo printlnParams[1];
+    printlnParams[0].type = VALUE_ANY;
+    printlnParams[0].name = "msg";
+    printlnParams[0].length = 3;
+    registerNativeSymbol(checker, "println", 7, VALUE_EMPTY, printlnParams, 1, parser, vm);
+
+    //intake(String/EMPTY prompt) -> string (the think user inputed)
+    ParamInfo intakeParams[1];
+    intakeParams[0].type = VALUE_ANY;
+    intakeParams[0].name = "prompt";
+    intakeParams[0].length = 6;
+    intakeParams[0].isOptional = true;
+    registerNativeSymbol(checker, "intake", 6, VALUE_STRING, intakeParams, 1, parser, vm);
+}
+```
+*Found in /src/typeChecker.c*
+
+```c++
+void registerMathSymbols(TypeChecker* checker, struct ASTparser* parser, struct Vm* vm)
+{
+
+    ParamInfo mathParams[1];
+    mathParams[0].type = VALUE_ANY_NUM;
+    mathParams[0].name = "num";
+    mathParams[0].length = 3;
+
+    registerNativeSymbol(checker, "sin", 3, VALUE_DOUBLE, mathParams, 1, parser, vm);   //sin(double/float/int radians) -> double
+    //...
+    ParamInfo mathParams2[2];
+    mathParams2[0].type = VALUE_ANY_NUM;
+    mathParams2[0].name = "num1";
+    mathParams2[0].length = 4;
+    mathParams2[1].type = VALUE_ANY_NUM;
+    mathParams2[1].name = "num2";
+    mathParams2[1].length = 4;
+    registerNativeSymbol(checker, "pow", 3, VALUE_DOUBLE, mathParams2, 2, parser, vm);  //expo(double/float/int toTheEPower) -> double
+```
+*Found in /src/typeChecker.c (trimmed, inside registerMathSymbols())*
+
+These are called by the AST compiler whenever it meets a `#pullf`, which you can see more of in [#pullf and Natives](https://olinat.net/docs/system-design/astCompiler). This is only the type checker's half of registering a library. The other half, `registerXNatives()`, gives the VM the actual C functions, and you can read about it on the [Functions & Natives](https://olinat.net/docs/system-design/functions) page. Libraries are opt-in, so if you never `#pullf` one, its symbols never get added, and calling any of its functions is an `UNDEFINED ERROR`. <br />
+
+Now we can finally explain `VALUE_ANY`. `println` accepts a value of any type, `sqrt` accepts any number (an `int`, a `float` or a `double`), and `length` accepts any array. The functions you write yourself can't do that, since every parameter has to be one exact type, so these three special types exist only so natives can be a little more flexible. Those are the `continue`s from the call check, and they are what give you errors like these:
+
+```
+:>>  | TYPE ERROR | at line 2: Please only input numeric arguements (int, float, double)]
+:>>  | TYPE ERROR | at line 2: Please input an array as an arguement into this function.]
+```
+
+That `isOptional` is the same idea. You can see it on `intake` above, where the prompt is optional, so both `intake()` and `intake("Name: ")` pass the check. <br />
+
+*Cool Note:* Adding a function to the standard library means touching **both halves**. You write the function in C for the VM, and then you add a `registerNativeSymbol()` line for the type checker. Forget the second half, and the function exists at runtime, but the checker has never heard of it, so no program can call it. The [Project Structure](https://olinat.net/docs/contributing/project-structure) page lists where each of those pieces lives.
+
+## Classes
+
+Classes are the most complicated part of the type checker. A class isn't a single type, it is a whole collection of fields and methods, and every instance of it has to be checked against that collection. It is all built on the same symbol table though, so nothing here will be new, there is just more of it. <br />
+
+Just like functions, classes are written down during the first pass. A class becomes a symbol with the type `VALUE_CLASS`, and its fields and methods are stored right inside of that symbol:
+
+```c++
+typedef struct CheckerMethodInfo
+{
+    const char* name;
+    int length;
+    ValueType returnType;
+    ParamInfo param[MAX_PARAMS];
+    int paramCount;
+} CheckerMethodInfo;
+typedef struct  CheckerFieldInfo
+{
+    ValueType type;
+    const char* name;
+    int length;
+    const char* className;
+    int classNameLength;
+} CheckerFieldInfo;
+```
+*Found in /src/typeChecker.h*
+
+```c++
+        //add in symbol and then get it for editing fields
+        addSymbol(checker, name, nameLength, 0, VALUE_CLASS, NULL, parser);
+        Symbol* classSymbol = lookUpSymbol(checker, name, nameLength);
+
+        if (match(T_INHERIT, parser))
+        {
+            consume(T_IDENTIFIER, "Expected superclass name after '->'.", "SYNTAX ERROR", parser);
+            classSymbol->superClassName = parser->previous.lexemeStart;
+            classSymbol->superClassNameLength = parser->previous.length;
+        }
+                        //...
+                        int slot = classSymbol->methodCount++;
+                        classSymbol->methodInfo[slot].name = fieldName;
+                        classSymbol->methodInfo[slot].length = fieldNameLength;
+                        classSymbol->methodInfo[slot].name = fieldName;
+                        classSymbol->methodInfo[slot].returnType = fieldType;
+                        classSymbol->methodInfo[slot].paramCount = 0;
+                        //...
+                        int slot = classSymbol->fieldCount++;
+                        classSymbol->fieldsInfo[slot].type = fieldType;
+                        classSymbol->fieldsInfo[slot].name = fieldName;
+                        classSymbol->fieldsInfo[slot].length = fieldNameLength;
+                        classSymbol->fieldsInfo[slot].className = NULL;
+                        classSymbol->fieldsInfo[slot].classNameLength = 0;
+```
+*Found in /src/ASTcompiler.c (trimmed, inside declareFunction())*
+
+The class symbol gets a `superClassName` if it inherits from something, a growing array of `fieldsInfo` (a name and a type for each field), and a growing array of `methodInfo` (a name, a return type, and a parameter list, exactly like a function). <br />
+
+Now for an interesting detail about how types work here. Every instance, no matter which class it came from, has the same type in the enum, `VALUE_INSTANCE`. There is no separate "Player type" and "Enemy type". So the checker keeps track of *which* class an instance is on the side. When you write `make Player p = Player();`, the variable's symbol gets a `className`:
+
+```c++
+        //check to see if the type is a class declaration somewhere, and update the metadata in the typechecker to know what class it is
+        if (type == VALUE_INSTANCE)
+        {
+            Symbol* symbol = lookUpSymbol(checker, name, nameLength);
+            symbol->className = checker->lastClassName;
+            symbol->classNameLength = checker->lastClassNameLength;
+        }
+```
+*Found in /src/ASTcompiler.c (trimmed, inside varDeclaration())*
+
+Where does `checker->lastClassName` come from? It is a little breadcrumb that the checker leaves for itself. Writing a class name as a type (`make Player ...`) leaves one, and so does calling a class (`Player()`). Then `varDeclaration()` copies the latest breadcrumb onto the new variable's symbol. Now `p` is a `VALUE_INSTANCE` with the `className` of `Player`. <br />
+
+Here is how calling a class is checked. It is a branch of that same `EXPR_CALL` case from before:
+
+```c++
+            //check for classes
+            if (symbol->type == VALUE_CLASS)
+            {
+                checker->lastClassName = symbol->name;
+                checker->lastClassNameLength = symbol->length;
+
+                //type check the params of a constructor
+                Symbol* classSymbol = lookUpSymbol(checker, symbol->name, symbol->length);
+                if (classSymbol != NULL && expr->objectCall.argCount > 0)
+                //...
+                result = VALUE_INSTANCE;
+                break;
+            }
+```
+*Found in /src/typeChecker.c (trimmed)*
+
+If the thing being called is a `VALUE_CLASS`, we leave the breadcrumb, check any arguments against the class's constructor (the method with the same name as the class), and say that the result is a `VALUE_INSTANCE`. <br />
+
+Next up is getting at an instance's fields, like `p.hp`. This is `checkClassField()`, and it handles both reading and writing a field:
+
+```c++
+    //populate the knowledge of what class the call is coming from
+    const char* className = NULL;
+    int classNameLength = 0;
+    if (callee->type == EXPR_VARIABLE)
+    {
+        //simple case of someInstance.value;
+        Symbol* instanceSymbol = lookUpSymbol(checker, callee->variable.name, callee->variable.length);
+        if (instanceSymbol != NULL)
+        {
+            //populate the class the var was gotten from;
+            className = instanceSymbol->className;
+            classNameLength = instanceSymbol->classNameLength;
+        }
+    }
+    else
+    {
+        //chained call //someInstance1.someInstance2.value;
+        className = checker->lastClassName;
+        classNameLength = checker->lastClassNameLength;
+    }
+
+    //check to see if the name was actually populated
+    if (className == NULL)
+    {
+        typeError(checker, parser, expr, "Unknown class type.", "TYPE ERROR");
+        return VALUE_ERROR;
+    }
+
+    //get the last accessed class in the checker's metadata from earlier, check to see if it exists obviously
+    Symbol* classSymbol = lookUpSymbol(checker, className, classNameLength);
+    if (classSymbol == NULL)
+    {
+        typeError(checker, parser, expr, "Unknown or undefined class type was attempted to be called.", "TYPE ERROR");
+        return VALUE_ERROR;
+    }
+```
+*Found in /src/typeChecker.c*
+
+It first makes sure that whatever is on the left of the dot is an instance. Then it needs to know which class it is. If it is a plain variable, like `p`, we look up that variable's symbol and read its `className`. Otherwise, it is a longer chain, so we fall back on the breadcrumb. With the class name in hand, we look up the *class's* own symbol, and that is where the fields are:
+
+```c++
+    //look up the fields in the other classes, walk up the chains
+    Symbol* currentClass = classSymbol;
+    while (currentClass != NULL)
+    {
+        for (int i = 0; i < currentClass->fieldCount; i++)
+        {
+            if (currentClass->fieldsInfo[i].length == fieldLength && memcmp(currentClass->fieldsInfo[i].name, fieldName, fieldLength) == 0)
+            {
+                if (currentClass->fieldsInfo[i].type == VALUE_INSTANCE)
+                {
+                    checker->lastClassName = currentClass->fieldsInfo[i].className;
+                    checker->lastClassNameLength = currentClass->fieldsInfo[i].classNameLength;
+                }
+                return currentClass->fieldsInfo[i].type;
+            }
+        }
+        if (currentClass->superClassName == NULL) break;
+        currentClass = lookUpSymbol(checker, currentClass->superClassName, currentClass->superClassNameLength);
+    }
+
+
+    typeError(checker, parser, expr, "Undefined field.", "TYPE ERROR");
+    return VALUE_ERROR;
+```
+*Found in /src/typeChecker.c*
+
+We search the fields of that class, and if the field isn't there, we walk **up the chain of superclasses** using `superClassName`, searching each parent in turn. That is how a child class can use the fields that it inherited. If we run out of classes without a match, it is an `Undefined field` error. <br />
+
+Calling a method, like `p.heal(5)`, goes down the very same road. It is an `EXPR_CALL` whose callee is a field access, so we find the class the same way, and then search `methodInfo` instead of `fieldsInfo`:
+
+```c++
+                //actually find the method inside of the class symbol as set up in functionDecalation in astcompiler.c
+                const char* methodName = expr->objectCall.callee->getField.fieldName;
+                int methodLength = expr->objectCall.callee->getField.fieldLenght;
+                bool methodFound = false;
+                for (int i = 0; i < classSymbol->methodCount; i++)
+                {
+                    //actually check to find the right method
+                    if (classSymbol->methodInfo[i].length == methodLength && memcmp(classSymbol->methodInfo[i].name, methodName, methodLength) == 0)
+                    {
+                        //check the arg count
+                        if (expr->objectCall.argCount != classSymbol->methodInfo[i].paramCount)
+                        {
+                            typeError(checker, parser, expr, "A different number of arguements was passed into class method call than defined in method's declaration.", "SYNTAX ERROR");
+                            result = VALUE_ERROR;
+                            methodFound = true;
+                            break;
+                        }
+
+                        //check the argtypes of that method now
+                        for (int j = 0; j < expr->objectCall.argCount; j++)
+                        {
+                            ValueType argType = checkExpression(checker, expr->objectCall.args[j], parser);
+                            if (classSymbol->methodInfo[i].param[j].type != VALUE_ANY && argType != classSymbol->methodInfo[i].param[j].type)
+                            {
+                                typeError(checker, parser, expr, "Instance method call was found with an arguement different from declared parameter type", "TYPE MISMATCH ERROR");
+                                result=VALUE_ERROR;
+                                methodFound = true;
+                                break;
+                            }
+                        }
+                        result = classSymbol->methodInfo[i].returnType;
+                        methodFound = true;
+                        break;
+                    }
+```
+*Found in /src/typeChecker.c*
+
+The count and the types of the arguments get checked just like they were for a function. If the method isn't on the class, we walk up the superclasses the same way as before. <br />
+
+Two more keywords need to know about classes. `this` is the easy one, because we already know the class: it is `currentClassName`, which the AST compiler sets while it is compiling the body of a class. Outside of a class, it is an error.
+
+```c++
+        case EXPR_THIS:
+        {
+            //check to make sure that 'this' is used inside of a class context
+            if (checker->currentClassName == NULL)
+            {
+                typeError(checker, parser, expr, "You may not use 'this' outside of a class method, there would be no 'this' to call.", "LOGIC ERROR");
+                result = VALUE_ERROR;
+                break;
+            }
+            //update lastClassName so that way chained calls using this would work as well
+            checker->lastClassName = checker->currentClassName;
+            checker->lastClassNameLength = checker->currentClassNameLength;
+            result = VALUE_INSTANCE; //since this is basically the clas s itself
+            break;
+        }
+```
+*Found in /src/typeChecker.c*
+
+And `pullf.method()` inside of a method works the same way as everything above, except that it starts the search at the parent class instead. <br />
+
+*Cool Note:* Since the class of an instance is remembered by the variable's symbol (and that breadcrumb), it only works when there is a variable to look at. That is the reason for a few quirks you might run into. An instance passed into a function as a parameter doesn't remember its class, so `p.hp` inside of that function is an `Unknown class type` error. An instance inside of an array doesn't remember it either, so `team[0].hp` doesn't work. And because every instance is just a `VALUE_INSTANCE`, `make Player p = Enemy();` currently slips through the checker, and `p` simply gets treated as an `Enemy`. A real fix would be to make the class a proper part of the type, and that would be a great first contribution for anybody who wants to dig into the checker.
+
+# Where to Go Next
+
+That is the type checker! Every tree that the AST compiler builds gets walked, one expression at a time, and either comes back with a type, or the program stops right there with an error. Once a tree gets its stamp of approval, it moves on to the [ByteCode Compiler](https://olinat.net/docs/system-design/bytecodeCompiler), which turns it into the instructions that the VM runs.
