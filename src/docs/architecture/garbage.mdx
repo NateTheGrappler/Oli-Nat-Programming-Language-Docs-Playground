@@ -1,0 +1,400 @@
+# Garbage Collector Overview
+
+Technically, a garbage collector is not needed for a language. We would be welcome to stop the pipeline at scanner to AST to bytecode to VM. The issue with that is that Oli-Nat creates a lot of its own **objects** while it runs, things like strings, arrays, closures, classes, and class instances. <br />
+
+These objects of course take up memory, sometimes lots of memory, and whenever an object goes out of scope or is no longer accessible, its memory is still sitting there. If nothing ever gives it back, we **leak memory**, which can be terrible in the long term. Hence, we have the garbage collector, whose main goal is to find the objects that we can no longer access and free their memory back up, so that we never leak any memory! <br />
+
+As a forewarning, this entire section relies a lot on an understanding of how objects are represented inside of Oli-Nat. That topic has its own documentation, so I will not beat a dead horse by explaining all of it here, please see the object documentation instead. <br />
+
+That being said, here is the main `collectGarbage()` function:
+
+```c++
+//main function
+void collectGarbage(struct Vm* vm)
+{
+#ifdef DEBUG_LOG_GC
+    printf("-- gc begin\n");
+    size_t before = vm->bytesAllocated;
+#endif
+
+    markRoots(vm);
+    traceRefrences(vm);
+    HashmapRemoveWhite(&vm->strings, vm);
+    sweep(vm);
+
+    vm->nextGC = vm->bytesAllocated * GC_HEAP_GROW_FACTOR;
+
+#ifdef DEBUG_LOG_GC
+    printf("-- gc end\n");
+    printf("   collected %zu bytes (from %zu to %zu) next at %zu\n",
+    before - vm->bytesAllocated, before, vm->bytesAllocated,
+    vm->nextGC);
+#endif
+}
+```
+*Found in /src/memory.c*
+
+There is a lot of debugging code, which is just for printing out every collection, and how much it freed. The actual function, all fluff aside, is just 4 separate function calls that make up a three step process. For context, every object stores an `isMarked` boolean, which says whether we have found it yet:
+
+1. First, we mark all of the **roots**. These are all of the objects the VM can reach directly: every object on the stack, the closures of every function currently running, any open upvalues, and everything in the globals hashmap. Each one gets marked, and put on the VM's `grayStack`. This all happens in `markRoots()`.
+
+2. After this, we need to walk that `grayStack`. Everything the VM can reach directly is marked, but those objects might reference *other* objects, which means those are still reachable too. This would be things like the upvalues that a closure holds, or the methods and fields of a class. This all gets done in `traceRefrences()`. Then `HashmapRemoveWhite()` cleans the strings that are about to be freed out of the string interning table (more on why later).
+
+3. Lastly, we have marked every object that is still reachable, along with everything those objects can reach. We can now safely say that any object we have **not** marked is one we can free. So we walk the linked list of every object stored in the VM, and do a little snip snip whenever we find one that is not marked. This is `sweep()`.
+
+Of course, after all of this there needs to be some clean up. The `isMarked` flag of every surviving object has to be reset for the next collection, which happens as we walk the linked list. The next fun line is this: `vm->nextGC = vm->bytesAllocated * GC_HEAP_GROW_FACTOR;` Now, this looks pretty random, but it actually decides when the GC gets called next. <br />
+
+*Cool Note:* This is called a **mark and sweep** collector, and the three steps use what's called the *tri-color* idea. A **white** object hasn't been found yet, a **gray** object has been found but we haven't looked inside of it yet (that is what the `grayStack` holds), and a **black** object has been found *and* had everything it references marked. When there is nothing gray left, anything still white is garbage. <br />
+
+Let's look at the reallocate function:
+
+```c++
+void* reallocate(void* pointer, size_t oldSize, size_t newSize, struct Vm* vm)
+{
+    vm->bytesAllocated += newSize - oldSize;
+    if (newSize > oldSize)
+    {
+#ifdef DEBUG_STRESS_GC
+        collectGarbage(vm);
+#endif
+
+        if (vm->bytesAllocated > vm->nextGC)
+        {
+            collectGarbage(vm);
+        }
+    }
+
+    //if youre freeing something then yk, just free it
+    if (newSize == 0)
+    {
+        free(pointer);
+        return NULL;
+    }
+
+    //allocate to a new point in memory with whatever new given size you got
+    void* result = realloc(pointer, newSize);
+    if (result == NULL) exit(1);
+    return result;
+}
+```
+*Found in /src/memory.c*
+
+This function was showcased a bit in the [Chunks & Memory](https://olinat.net/docs/system-design/chunks-memory) documentation, but as a quick summary: based on the sizes it is given, it either allocates, resizes, or frees memory. C already has a function that does most of this, `realloc()`, which we do use. <br />
+
+But this is where the benefit of writing our own reallocate function comes in. This function gets called EVERY SINGLE TIME we want to allocate memory for ANYTHING, any new object, any new string, anything at all, for the whole lifetime of our program. That makes it the perfect place to call our `collectGarbage()` function. <br />
+
+The VM keeps track of how many bytes it has allocated in total (`bytesAllocated`), and a threshold for how much it can allocate before the next collection (`nextGC`). If we ever see that the VM has allocated more than that threshold, we call the garbage collector to do its thing. Then, at the end of the collection, we set the new threshold to **double** whatever is still in use, since `GC_HEAP_GROW_FACTOR` is `2`. That way, a program that only uses a little memory gets cleaned up often, and a program that genuinely needs a lot of memory doesn't waste all of its time collecting. <br />
+
+This does have its downsides though. A garbage collection can be triggered by ANY new allocation, and if a clean up happens while an object is still being created, before anything points to it, the GC will think it is garbage and free it. That gives us really weird, hard to replicate bugs. Hence, we do things like:
+
+```c++
+push(vm, CREATE_OBJECT_VAL((Obj*)string));
+MapSet(&vm->strings, string, CREATE_EMPTY_VAL(), vm);
+pop(vm);
+```
+*Found in /src/object.c in allocateString()*
+
+Here, we push the new string onto the stack before we do anything else with it, since `MapSet()` might need to allocate memory and trigger a collection. Being on the stack makes it a root, so it survives. New allocations happen all the time at compile time too, not only at runtime, so we always have to protect every single new object like this. This is where **stress testing** the GC with `DEBUG_STRESS_GC` comes in handy, if you ever want to try it out yourself. It runs a collection on every single allocation, so any object that isn't protected breaks right away, instead of once in a blue moon. <br />
+
+All of that aside, that's the main theory behind everything, but in terms of the actual implementation, it really is quite simple.
+
+## Marking The First Pass
+
+We start by marking all of the things that the VM has direct access to, which is the items on the stack, the closures of the running functions, the open upvalues, and the globals hashmap:
+
+```c++
+static void markRoots(struct Vm* vm)
+{
+    //go down stack and mark all of those as safe
+    for (Value* slot = vm->stack; slot < vm->stackTop; slot++)
+    {
+        markValue(*slot, vm);
+    }
+
+    //do closures
+    for (int i = 0; i < vm->frameCount; i++)
+    {
+        markObject((Obj*)vm->frames[i].closure, vm);
+    }
+
+    //get the upvalues still stored in vm
+    for (ObjUpValue* upVal = vm->openUpValues; upVal != NULL; upVal = upVal->next)
+    {
+        markObject((Obj*)upVal, vm);
+    }
+
+    //mark all global functions
+    markHashmap(&vm->globals, vm);
+}
+```
+*Found in /src/memory.c*
+
+The function itself is nothing too insane to look at. The main point is to mark everything that the VM itself can see, so we can just use the VM directly to loop over all of the items, and then use a few helpers to mark them:
+
+### Helper Mark Functions:
+
+Marking values:
+
+```c++
+void markValue(Value value, struct Vm* vm)
+{
+    if (IS_OBJECT(value)) markObject(GET_OBJECT_VAL(value), vm);
+}
+```
+*Found in /src/memory.c*
+
+Truly a very simple thing. The `sweep()` function further down only frees memory from the linked list of objects, which is where every object gets added when it is created. Values like an `int` or a `bool` aren't objects at all, they are stored directly inside of the `Value` itself, with nothing on the heap, so they never need to be marked or freed. <br />
+
+So we just check if the value is in fact an object, and if it is, we mark it, which sets that internal `isMarked` boolean, and pushes it onto the VM's `grayStack`:
+
+```c++
+void markObject(Obj* object, struct Vm* vm)
+{
+    if (object == NULL) return;
+    if (object->isMarked) return;
+
+#ifdef DEBUG_LOG_GC
+    printf("%p mark ", (void*)object);
+    printValue(CREATE_OBJECT_VAL(object));
+    printf("\n");
+#endif
+
+    object->isMarked = true;
+
+    if (vm->grayCapacity < vm->grayCount + 1)
+    {
+        vm->grayCapacity = GROW_CAPACITY(vm->grayCapacity);
+        vm->grayStack = (Obj**)realloc(vm->grayStack, sizeof(Obj*) * vm->grayCapacity);
+        if (vm->grayStack == NULL) exit(1); //if no space to allocate, bail program
+    }
+    vm->grayStack[vm->grayCount++] = object;
+
+}
+```
+*Found in /src/memory.c*
+
+Of course, if an object is already marked, or is `NULL`, then we don't need to do anything with it. Otherwise, it is the same kind of growing array check that we do for the chunk itself. The difference here is that the gray stack is the one thing that does **not** call our own `reallocate()` function, and uses C's `realloc()` directly instead. <br />
+
+As you might have assumed, this is because a `reallocate()` call can trigger the GC, and triggering the GC while the GC is already running is a terrible recipe for things being freed in the middle of being used, and freed memory being indexed. <br />
+
+That `object->isMarked` check at the top matters too. It means each object only ever gets put on the gray stack once, so if two objects point at each other, we don't loop forever. <br />
+
+With these, we have almost every directly accessible thing marked, and the only thing left is the **globals hashmap**, which holds every global variable, function, and class (and the natives too):
+
+```c++
+void markHashmap(Hashmap* hashmap, struct Vm* vm)
+{
+    for (int i = 0; i < hashmap->capacity; i++)
+    {
+        Bucket* bucket = &hashmap->buckets[i];
+        markObject((Obj*)bucket->key, vm);
+        markValue(bucket->value, vm);
+    }
+}
+```
+*Found in /src/memory.c*
+
+Lucky for us, the two functions above this one do the bulk of the work that comes with actually marking anything. A hashmap is really just an array of **buckets**, each holding a key and a value, and we use a hash function on the key to get the index of the bucket that holds its value. <br />
+
+All this to say, we just walk this array of buckets and mark both the key and the value stored in each one, and boom, the globals are all done. (Empty buckets have a `NULL` key, which `markObject()` already ignores.) <br />
+
+Notice that the *other* hashmap in the VM, the `strings` table used for string interning, is **not** marked here. That is on purpose, and it is what `HashmapRemoveWhite()` is for, which we will get to below.
+
+## Tracing Outer Objects
+
+Now we have "grayed" everything that the VM can directly reach on its own. This is wonderful, but some of those objects can reference *other* objects. This would be things like the fields of a class, or the upvalues of a closure. So now we need to "blacken" our objects, by marking everything they reference too:
+
+```c++
+static void traceRefrences(struct Vm* vm)
+{
+    while (vm->grayCount > 0)
+    {
+        Obj* object = vm->grayStack[--vm->grayCount];
+        blackenObject(object, vm);
+    }
+
+}
+```
+*Found in /src/memory.c*
+
+This is trivially simple, because we already have a list of every object that we marked in our first pass. We just keep popping objects off of the gray stack, and use the upcoming `blackenObject()` function to, on a case by case basis (switch cases, the unsung hero once again), mark the objects that each one references:
+
+```c++
+static void blackenObject(Obj* object, struct Vm* vm)
+{
+#ifdef DEBUG_LOG_GC
+    printf("%p blacken ", (void*)object);
+    printValue(CREATE_OBJECT_VAL(object));
+    printf("\n");
+#endif
+
+    switch (object->type)
+    {
+        case OBJ_CLOSURE:
+        {
+            ObjClosure* closure = (ObjClosure*)object;
+            markObject((Obj*)closure->function, vm);
+            for (int i = 0; i < closure->upValueCount; i++)
+            {
+                markObject((Obj*)closure->upValues[i], vm);
+            }
+            break;
+        }
+        case OBJ_FUNCTION:
+        {
+            //dont clear the param info since it is just a static metadata array
+            ObjFunction* function = (ObjFunction*)object;
+            markArray(&function->chunk.constants, vm);
+            break;
+        }
+        case OBJ_STATIC_ARRAY:
+        {
+            ObjStaticArray* array = (ObjStaticArray*)object;
+            for (int i = 0; i < array->length; i++)
+            {
+                markValue(array->values[i], vm);
+            }
+            break;
+        }
+        case OBJ_UPVALUE:
+        {
+            markValue(((ObjUpValue*)object)->closed, vm); //mark value internally held in upvalue
+            break;
+        }
+        case OBJ_CLASS:
+        {
+            ObjClass* klass = (ObjClass*)object;
+            markHashmap(&klass->methods, vm);
+            markObject((Obj*)klass->constructor, vm);
+            for (int i = 0; i < klass->fieldCount; i++)
+            {
+                markObject((Obj*)klass->fields[i].name, vm);
+                markValue(klass->fields[i].defaultValue, vm);
+            }
+            break;
+        }
+        case OBJ_INSTANCE:
+        {
+            ObjInstance* instance = (ObjInstance*)object;
+            markObject((Obj*)instance->class, vm);
+            for (int i = 0; i < instance->fieldCount; i++)
+            {
+                markValue(instance->fields[i], vm);
+            }
+            break;
+        }
+        case OBJ_STRING:
+        case OBJ_NATIVE:
+            break;
+
+
+    }
+}
+```
+*Found in /src/memory.c*
+
+This is probably one of the bulkier functions in the entire GC, and all it really does is look at the type of the object, to see if it is a type that can hold references, and then use the functions from above to mark whatever objects those are. <br />
+
+The fun thing here is that `markObject()` pushes every *newly* marked object onto the gray stack, even while we are in the middle of blackening. So that `while` loop in `traceRefrences()` keeps going until there is nothing gray left, which means it catches references of references of references, however deep they go! <br />
+
+Some types of objects don't reference anything else, like natives and strings, so they just fall through and we don't do anything with them. But for something fun, like say a class:
+
+```c++
+case OBJ_CLASS:
+{
+	ObjClass* klass = (ObjClass*)object;
+	markHashmap(&klass->methods, vm);
+	markObject((Obj*)klass->constructor, vm);
+	for (int i = 0; i < klass->fieldCount; i++)
+	{
+		markObject((Obj*)klass->fields[i].name, vm);
+		markValue(klass->fields[i].defaultValue, vm);
+	}
+	break;
+}
+```
+*Found in /src/memory.c*
+
+We cast the object to its actual class struct (once again, really look into the way objects work in Oli-Nat), and then we know a class has 3 things that need marking. There is the hashmap that stores the methods, so we mark it with `markHashmap()`. Then there is the constructor, which is just a regular closure object, so we mark it. And then there are all of the fields in the class's field array, which we literally walk, marking both the name and the default value of each field. Simple as that! <br />
+
+I will not go over every single object type, just because a lot of them are repetitive, and you can get a pretty good understanding of what needs to be marked just from looking at the struct of each object, as well as from the code above.
+
+## Sweeping and Cleaning Hashmaps
+
+Now, the last two functions that `collectGarbage()` called were `HashmapRemoveWhite()` and `sweep()`. Even though the latter is probably more intuitive than the former, I will explain the former first:
+
+```c++
+static void HashmapRemoveWhite(Hashmap* map, struct Vm* vm)
+{
+    for (int i = 0; i < map->capacity; i++)
+    {
+        Bucket* bucket = &map->buckets[i];
+        if (bucket->key != NULL && !bucket->key->obj.isMarked)
+        {
+            MapDelete(map, bucket->key);
+        }
+
+    }
+}
+```
+*Found in /src/memory.c*
+
+The hashmap remove white function cleans out any of the buckets in the `strings` table whose string was not hit during the marking process. Now, why is this important, you may ask? <br />
+
+Remember that the `strings` table is the **string interning** table, and every single string in the program is in it, which is what lets us compare strings in `O(1)` just by comparing their pointers. If we marked that table like the globals, every string would always be reachable through it, and no string would ever get freed. So we deliberately don't mark it. The table only *remembers* strings, it doesn't keep them alive. This is called a **weak reference**. <br />
+
+The catch is that the `sweep()` coming up is about to free every string nobody else is using, and the strings table would still be holding pointers to them. Then the next time we interned a string, the table would go and compare it against freed memory, which is a really bad time. So right before the sweep, we remove every string that isn't marked from the table, so it never points at anything that is about to be freed. <br />
+
+The function itself is very simple. We just walk the entire hashmap, look for any bucket that has a key and hasn't been marked, and if we find one, we delete it with the built in `MapDelete()` function (once again, see the objects and data structures docs). <br />
+
+All of that aside, it's now time for the payoff:
+
+```c++
+static void sweep(struct Vm* vm)
+{
+    Obj* prev = NULL;
+    Obj* current = vm->objects;
+
+    while (current != NULL)
+    {
+        if (current->isMarked)
+        {
+            current->isMarked = false;
+            prev = current;
+            current = current->next;
+        }
+        else
+        {
+            Obj* unreachable = current;
+            current = current->next;
+            if (prev != NULL)
+            {
+                prev->next = current;
+            }
+            else
+            {
+                vm->objects = current;
+            }
+
+            freeObject(unreachable, vm);
+        }
+    }
+}
+```
+*Found in /src/memory.c*
+
+A bit anti-climactic, it honestly looks like something right out of a leetcode solution, and in all reality, that is exactly what you are looking at. It is a simple walk through a linked list. If we find an object that is marked, it survives, so we reset its `isMarked` back to `false` for the next collection and move on. If we find one that is not marked, we change the previous node's pointer to skip over it (or move the head of the list, if it was the very first object), and then free it. <br />
+
+Freeing the object is also a rather simple endeavour. It is basically just another switch case, which uses those lower level memory macros (see the [Chunks & Memory](https://olinat.net/docs/system-design/chunks-memory) docs) to free the object's data. It gets a bit more nuanced, but it mostly follows the same pattern as tracing the objects did!
+
+## Putting It All Together
+
+So, the whole life of an object goes like this. It gets created through `reallocate()`, added to the VM's linked list of objects, and used by your program for as long as it needs it. Once nothing can reach it anymore, the next collection doesn't mark it, `sweep()` finds it unmarked, and its memory is given back. And when your program finishes, `freeObjects()` frees everything that is left, so Oli-Nat always cleans up completely after itself. <br />
+
+*Cool Note:* Some languages use **reference counting** instead, where every object counts how many things point to it, and is freed the moment that count hits zero. That is simpler in some ways, but two objects that point at each other never hit zero, so they leak forever. A tracing collector like this one doesn't have that problem, since it only cares about whether an object can be reached from the roots. <br />
+
+*Cool Note:* If you want to watch all of this happen, turn on `DEBUG_LOG_GC` in `/include/common.h`. It prints every object as it gets marked and blackened, and how many bytes every collection freed. Turn on `DEBUG_STRESS_GC` alongside it, and you get to see a collection on every single allocation.
+
+## Where to Go Next
+
+And that is the end of the pipeline! Your code has gone all the way from a string of characters, through the scanner, the AST compiler, the type checker, and the bytecode compiler, been run by the virtual machine, and had its memory cleaned up after it by the garbage collector. If you want to go back to the start and see the whole thing at once, the [Introduction to Design](https://olinat.net/docs/system-design/introductionToDesign) page has the overview, and if you want to find where any of these pieces live in the code, see [Project Structure](https://olinat.net/docs/contributing/project-structure).

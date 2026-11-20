@@ -122,7 +122,7 @@ export const sections: Section[] = [
         
         {slug: 'garbage',                  title: "Garbage Collector"},
         
-        {slug: 'dataStructures',            title: 'Key Data Structures'},
+        {slug: 'dataStructures',            title: 'Objects & Data Structures'},
         {slug: 'functions',                 title: 'Functions & Closures'}
 
     ],
