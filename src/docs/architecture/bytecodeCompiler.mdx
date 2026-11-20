@@ -1,0 +1,493 @@
+# Bytecode Compiler Overview
+
+Alright! This documentation covers the **Bytecode Compiler**. Now, if you have looked into the [AST Compiler](https://olinat.net/docs/system-design/astCompiler) documentation at all, you might think that this is also going to be a very complicated process, the word *compiler* is for sure a bit scary. The thing is that this is actually probably one of the easier parts of the pipeline to understand! <br />
+
+You see, we already have A LOT of context thanks to all of that hard work we did with the **Abstract Syntax Trees**, and [type checking](https://olinat.net/docs/system-design/typeChecker) them at creation. We basically already have trees representative of context, that we know are valid in the type and syntax sense. All of the leg work really pays off, because now in the bytecode compiler we just look at the expression and turn it into an `OP_CODE`. <br />
+
+These were covered a bit in the overview, but are important here, so I want to showcase them in full once again:
+
+```c++
+typedef enum
+{
+    OP_ADD,
+    OP_MULTIPLY,
+    OP_SUBTRACT,
+    OP_NEGATE,
+    OP_DIVIDE,
+    OP_RETURN,
+    OP_NOT,
+    OP_EQUAL,
+    OP_NOT_EQUAL,
+    OP_GREATER,
+    OP_LESS,
+    OP_GREATER_EQUAL,
+    OP_LESS_EQUAL,
+    OP_CONSTANT,
+    OP_CONSTANT_LONG,
+    OP_POP,
+    OP_INVERSE,
+    OP_DEFINE_GLOBAL,
+    OP_SET_GLOBAL,
+    OP_GET_GLOBAL,
+    OP_GET_LOCAL,
+    OP_SET_LOCAL,
+    OP_JUMP_IF_FALSE,
+    OP_JUMP,
+    OP_LOOP,
+    OP_CALL,
+    OP_MISSING_RETURN,
+    OP_CREATE_ARRAY,
+    OP_GET_ARRAY_INDEX,
+    OP_SET_ARRAY_INDEX,
+    OP_CLOSURE,
+    OP_CLOSE_UPVALUE,
+    OP_GET_UPVALUE,
+    OP_SET_UPVALUE,
+    OP_CLASS,
+    OP_CLASS_METHOD,
+    OP_CLASS_FIELD,
+    OP_SET_FIELD,
+    OP_GET_FIELD,
+    OP_FIELD_DEFAULT,
+    OP_INVOKE,
+    OP_CONSTRUCTOR,
+    OP_INHERIT,
+    OP_SUPER,
+    OP_SUPER_INVOKE
+} OpCode;
+```
+*Found in /include/chunk.h*
+
+Now of course I understand this seems like a lot, but as previously said, each of these just represents an operation for handling some kind of instruction in our language. They range all the way from some of the basic math, to things like class inheritance or class instantiation calls. <br />
+
+I bring this up mainly because all of these are **bytecode**, they are what we are trying to turn the expressions we got from the AST into. In a clean world this would go through each stage of the pipeline one at a time, but in reality we handle each expression all the way through before we start the next one, which is all covered in the AST docs of course. <br />
+
+## Emitting Bytes
+
+The main bread and butter of the bytecode compiler is really the following function:
+
+```c++
+void emitByte(uint8_t byte, Chunk* chunk, ASTparser* parser, Vm* vm)
+{
+    writeToChunk(chunk, byte, parser->previous.line, vm);
+}
+```
+*Found in /src/Bytecompiler.c*
+
+This right here is what is really, really important. Given whatever context we find ourselves in based on the type of expression, we use this function to write each bytecode instruction to the chunk ([See the Chunks and Memory Docs](https://olinat.net/docs/system-design/chunks-memory)), to then be read later on by the virtual machine. <br />
+
+The process really is simple, because we just append a value to the dynamically resizing array that we made to represent our set of instructions. This function is used in almost every single context, like `emitBytes()`, which exists for convenience to emit two bytes at once, since that is a common operation. We even use it to build all of the other basic functions for emitting bytecode:
+
+```c++
+void emitConstant(Value value, Chunk* chunk, ASTparser* parser, Vm* vm)
+{
+    int constantIndex = addConstant(chunk, value, vm);
+    if (constantIndex <= UINT8_MAX)
+    {
+        emitBytes(OP_CONSTANT, (uint8_t)constantIndex, chunk, parser, vm);
+    }
+    else if (constantIndex <= UINT16_MAX)
+    {
+        emitByte(OP_CONSTANT_LONG, chunk, parser, vm);
+        emitByte((constantIndex >> 8) & 0xff, chunk, parser, vm);
+        emitByte(constantIndex & 0xff, chunk, parser, vm);
+    }
+    else
+    {
+        error("Too many constants in bytecode chunk", "MEMORY ERROR", parser);
+    }
+}
+```
+*Found in /src/Bytecompiler.c*
+
+This function is crucial to the entire operation of the Virtual Machine. This is where we emit the actual values that are used inside of every single expression in the language, the **literal values** like booleans or integers. These need to exist on the Virtual Machine's stack, so that we can pop them for operations. <br />
+
+As you can see, we add the constant's actual value to the constant array (once again, [See the Chunks and Memory Docs](https://olinat.net/docs/system-design/chunks-memory)), so we can remember its value at runtime. However, we don't only need to know its value, we also need to put it on the stack for evaluation. This is where we use `emitByte()` to emit the `OP_CONSTANT` operation code, which basically takes our value and pushes it onto the runtime's stack. <br />
+
+A caveat with this is that we are obviously limited by memory. A regular byte can only store an index up to `255`, hence we could only access 256 constant values in our chunk's constant array. This is okay while building the language, but in practice is not enough at all. So we add in the `OP_CONSTANT_LONG` operation code, which lets us index up to `65,535` constants. We just have to emit the long op code, and then the two bytes representing the index into the chunk's value array. <br />
+
+Here is how we emit bytecode for actually using those values:
+
+```c++
+static void emitBinaryOperator(const char* operator, Chunk* chunk, ASTparser* parser, Vm* vm)
+{
+    //math ops
+    if (strcmp(operator, "+") == 0) {emitByte(OP_ADD, chunk, parser, vm);      return;}
+    if (strcmp(operator, "-") == 0) {emitByte(OP_SUBTRACT, chunk, parser, vm); return;}
+    if (strcmp(operator, "/") == 0) {emitByte(OP_DIVIDE, chunk, parser, vm);   return;}
+    if (strcmp(operator, "*") == 0) {emitByte(OP_MULTIPLY, chunk, parser, vm); return;}
+
+    //comparisions
+    if (strcmp(operator, ">") == 0)  {emitByte(OP_GREATER, chunk, parser, vm);       return;}
+    if (strcmp(operator, "<") == 0)  {emitByte(OP_LESS, chunk, parser, vm);          return;}
+    if (strcmp(operator, ">=") == 0) {emitByte(OP_GREATER_EQUAL, chunk, parser, vm); return;}
+    if (strcmp(operator, "<=") == 0) {emitByte(OP_LESS_EQUAL, chunk, parser, vm);    return;}
+    if (strcmp(operator, "==") == 0) {emitByte(OP_EQUAL, chunk, parser, vm);         return;}
+    if (strcmp(operator, "!=") == 0) {emitByte(OP_NOT_EQUAL, chunk, parser, vm);     return;}
+
+    error("Invalid operation found in one of your math operations", "SYNTAX ERROR", parser);
+}
+```
+*Found in /src/Bytecompiler.c*
+
+Here is just a small example. Later on I will showcase how we use the expression's context to decide which one of these helper emit functions we actually use, but I want to give some context before getting into the switch statement. <br />
+
+As you can see, we use `emitByte()` a lot here, I told you it was rather important. The concept is very simple though. By the time this instruction runs, we know there will be two values sitting on top of our stack, thanks to the bytecode emitted for each side before it, and the AST being nice and responsible for the logic. So our job here is really simplified. <br />
+
+We already store the actual operator in the expression, so we just pass that into this function, and we get the benefit of using `strcmp()` for easy compilation. We then just emit the matching byte, and we end up with `OP_CONSTANT, INDEX, OP_CONSTANT, INDEX, OP_ADD` as our bytecode array of instructions. <br />
+
+As the VM goes through this, it knows to throw two constants onto the stack, and then the `OP_ADD` operation lets it know to pop them and add them together. The great thing is we do not even need to worry about what happens if we are adding two booleans, because the type checker and AST handle all of the hard work for us here.
+
+## More Complicated Emit Functions
+
+So, all of those are rather simple, at least conceptually, because all they really deal with is emitting the basic expressions, and not statements or variables yet. However, there are slightly more complicated things we might need to do in order to give our VM an easier time:
+
+```c++
+//control flow
+short emitJump(uint8_t instruction, Chunk* chunk, ASTparser* parser, Vm* vm)
+{
+    emitByte(instruction, chunk, parser, vm);
+    emitByte(0xff, chunk, parser, vm);
+    emitByte(0xff, chunk, parser, vm);
+    return (short)(chunk->count - 2);
+}
+```
+*Found in /src/Bytecompiler.c*
+
+So, this function is briefly mentioned in the AST Compiler docs. If you do not remember, the way that control flow works in the language is by jumping around inside of the bytecode array itself, using a bit of fun math with offsets. We do so here. <br />
+
+Now, all of the leg work once again is done in the AST, but we still do a bit of bookkeeping here. We emit the instruction that gives the jump its context, and then we emit two **placeholder** bytes (`0xff`), since we don't know the size of the control flow body yet. <br />
+
+We then return the location of those two bytes inside of the bytecode array, so that `patchJump()` knows exactly where to write the real distance of the jump once the body has been compiled. <br />
+
+That is really the only truly complex part, but there are some other functions you will see in the actual main brain of the bytecode compiler, and I want you to have a basic understanding of what they do:
+
+```c++
+void emitDefineGlobal(const char* name, int length, Chunk* chunk, ASTparser* parser, Vm* vm)
+{
+    ObjString* varName = copyString(name, length, vm);
+    uint8_t index = addConstant(chunk, CREATE_OBJECT_VAL((Obj*)varName), vm);
+    emitBytes(OP_DEFINE_GLOBAL, index, chunk, parser, vm);
+}
+void emitGetGlobal(const char* name, int length, Chunk* chunk, ASTparser* parser, Vm* vm)
+{
+    ObjString* varName = copyString(name, length, vm);
+    uint8_t index = addConstant(chunk, CREATE_OBJECT_VAL((Obj*)varName), vm);
+    emitBytes(OP_GET_GLOBAL, index, chunk, parser, vm);
+}
+void emitSetGlobal(const char* name, int length, Chunk* chunk, ASTparser* parser, Vm* vm)
+{
+    ObjString* varName = copyString(name, length, vm);
+    uint8_t index = addConstant(chunk, CREATE_OBJECT_VAL((Obj*)varName), vm);
+    emitBytes(OP_SET_GLOBAL, index, chunk, parser, vm);
+}
+```
+*Found in /src/Bytecompiler.c*
+
+All of these are basically doing the same thing, just in a different context. We get lucky in the sense that we can reuse the emit global functions for classes, functions, and global variables, because a function is technically just a variable that holds a function object. <br />
+
+Nonetheless, it really is simple, because all we do is **intern** the name of the global variable or function or whatever it is, and then add it as a constant inside of the chunk's value array. This lets the VM know which name to get or set in the **globals hashmap** at runtime. Very simple, but it really expands our horizons. <br />
+
+Of course, globals are not the only thing we have, locals need to be resolved too:
+
+```c++
+int resolveLocal(AstCompiler* compiler, const char* name, int length)
+{
+    for (int i = compiler->localCount - 1; i >= 0; i--)
+    {
+        Local* local = &compiler->locals[i];
+        if (local->length == length && memcmp(local->name, name, length) == 0) return i; //found right local
+    }
+    return -1; //no local found, must be global
+}
+```
+*Found in /src/Bytecompiler.c*
+
+Now of course, a local is different from a global, because its lifetime is generally shorter than the program's, so we can represent its lifetime with a **position in the stack**. <br />
+
+This is certainly not the first time we have run into this, so we already have a solution that we can piggyback off of. We just use the bookkeeping that the AST Compiler already did (the `locals` array) to find the position of the local. Notice that we do not actually emit any bytecode here. <br />
+
+Instead, this function is only a precursor, so we can tell whether a variable is a local or a global. A local really is just a value on the stack though, so the way we emit it is not much different from how we treat a regular constant:
+
+```c++
+void emitGetLocal(int position, Chunk* chunk, ASTparser* parser, Vm* vm)
+{
+    emitBytes(OP_GET_LOCAL, (uint8_t)position, chunk, parser, vm);
+}
+```
+*Found in /src/Bytecompiler.c*
+
+## The Main Bytecode Switch Case
+
+Now, just like with the interpreter function or the type checker function, the unsung hero of making a language is the **switch case**. This remains especially true for the bytecode compiler. We have a single function, which basically encompasses a single switch case:
+
+```c++
+void compileExpressionByte(Expr* expr, ASTparser* parser, Chunk* vmChunk, AstCompiler* compiler, Vm* vm)
+{
+
+    #ifdef DEBUG_TRACE_EXECUTION
+        printf("Ran inside of compile expression byte for expression: ");
+        printExpression(expr);
+        printf("\n");
+    #endif
+
+    if (expr == NULL)
+    {
+        error("NULL expression reached in compiler", "GOD HELP YOU", parser);
+        return;
+    }
+    
+    switch (expr->type)
+	{
+		//...
+	}
+}
+```
+*Found in /src/Bytecompiler.c*
+
+Now, this does not show the actual cases or anything like that, but the rest of this documentation goes over the different expressions, since they have a good amount of logic in regards to bytecode emission. <br />
+
+In the above code block, we have a fun little debug print, which prints out the expression that is about to get turned into bytecode, in Polish notation form. We then have a very humorous check where, if there is ever no expression and this function somehow runs, `GOD HELP YOU` gets printed out. Of course, the average user will never see this, since in a proper language it will never happen, but I like to chuckle during my debugging sessions. <br />
+
+All things considered, we take in pointers to all of the internal state (so nothing gets copied on each function call), as well as the actual expression we will be walking down to turn into bytecode. Here are some of those cases:
+
+```c++
+case EXPR_LITERAL:
+{
+	switch (expr->literal.type)
+	{
+		case VALUE_BOOL:   emitConstant(CREATE_BOOL_VAL(expr->literal.value.boolean_val), vmChunk, parser, vm);  break;
+		case VALUE_INT:    emitConstant(CREATE_INT_VAL(expr->literal.value.integer_val), vmChunk, parser, vm);   break;
+		case VALUE_FLOAT:  emitConstant(CREATE_FLOAT_VAL(expr->literal.value.float_val), vmChunk, parser, vm);   break;
+		case VALUE_DOUBLE: emitConstant(CREATE_DOUBLE_VAL(expr->literal.value.double_val), vmChunk, parser, vm); break;
+		case VALUE_STRING:
+		{
+			//copy the copied string in the expression object, then basically get the length of it (a bit inefficent but whatever)
+			//and then toss the vm in there, basically getting that raw c char* to an ObjString struct to a Value struct
+			emitConstant(CREATE_OBJECT_VAL((Obj*)copyString(expr->literal.value.string_val,
+	  strlen(expr->literal.value.string_val), vm)), vmChunk, parser, vm);
+			break;
+		}
+	}
+	break;
+}
+```
+*Found in /src/Bytecompiler.c*
+
+This is really the most foundational part of the bytecode compiler. This case is for **literal expressions**, which are the literal values inside of the programming language. They are stored as expressions, and are generally the leaf nodes at the very bottom of an expression as well. <br />
+
+Now, the literal expression stores its value as a raw C value inside of a union, very similar to the `Value` struct. Of course, the expression also holds its own type, which is what the outer case is based on. The inner case then checks which type of value we have, and uses a simple macro (like `CREATE_INT_VAL`) to convert the raw C value into a `Value` that Oli-Nat is able to recognize. <br />
+
+This is then emitted as a constant with the `emitConstant()` function showcased earlier in this documentation. Things are a bit different for strings, because they exist as object values and so need to be treated a bit differently. So far they have been raw C strings, but the bytecode needs them to exist as **objects**, so we make that conversion here with `copyString()`. <br />
+
+Other than that, this is generally the base case at the end of a long walk down an expression, speaking of which:
+
+```c++
+case EXPR_BINARY:
+{
+	compileExpressionByte(expr->binary.left, parser, vmChunk, compiler, vm);
+	compileExpressionByte(expr->binary.right, parser, vmChunk,compiler, vm);
+	emitBinaryOperator(expr->binary.operator, vmChunk, parser, vm);
+	break;
+}
+case EXPR_UNARY:
+{
+	compileExpressionByte(expr->unary.right, parser, vmChunk, compiler, vm);
+	emitUnaryOperator(expr->unary.operator, vmChunk, parser, vm);
+	break;
+}
+case EXPR_GROUPING:
+{
+	//just pass it on
+	compileExpressionByte(expr->grouping.expr, parser, vmChunk, compiler, vm);
+	break;
+}
+```
+*Found in /src/Bytecompiler.c*
+
+All of these are very simple cases. Under the hood, at least for the binary case, these are just expressions sitting under an operator node. Each expression stores its children the way the AST Compiler defined them, so we use this to our advantage and just compile from the bottom up. <br />
+
+Think of it as a **depth first** walk where we handle the children before the parent (this is called a *post-order* traversal). We go all the way down to the bottom of each branch, and emit instructions through recursive calls to the child expressions first, and then emit the parent's instruction after them. That way the values are always on the stack before the operator that needs them. <br />
+
+Things are also a lot easier here because this is where the process of tokens to AST to bytecode ends. The bytecode is the final goal, so we do not need to hand the data off anywhere else, we just store it within our chunk. <br />
+
+There are a lot of other expressions that follow the same principle, so I will skip the bulk of them to keep the documentation more precise. The main idea is just the recursive calls to emit instructions in the right order, but we do have some complications:
+
+```c++
+case EXPR_VARIABLE:
+{
+	int scan = resolveLocal(compiler, expr->variable.name, expr->variable.length);
+	if (scan != -1)
+	{
+		emitGetLocal(scan, vmChunk, parser, vm);
+	}
+	else
+	{
+		int upVal = resolveUpvalue(compiler, expr->variable.name, expr->variable.length);                  //look for upval
+		if (upVal != -1) { emitBytes(OP_GET_UPVALUE, (uint8_t)upVal, vmChunk, parser, vm); }   //emit getting it to the vm
+		else {emitGetGlobal(expr->variable.name, expr->variable.length, vmChunk, parser, vm); }            //emit global as a final resort                                                  //otherwise you know it is a local
+	}
+	break;
+}
+```
+*Found in /src/Bytecompiler.c*
+
+Variables are actually probably some of the least complicated of these, as a matter of fact. The thing is that whenever we have a variable to access, there is more than one option, instead of just one like we have with literals. <br />
+
+We need to know which case we have, so we run `resolveLocal()` to see if the name of the variable is in the list of known locals, and if it is, we get back its index, which is its position in the stack. Then we just emit `OP_GET_LOCAL` with that position. <br />
+
+If it isn't a local of the current function, there is one more check before we give up on it. It might be a local of a function **around** this one, which a closure has captured, and that makes it an **upvalue**. `resolveUpvalue()` (from the AST compiler) checks for that, and if so we emit `OP_GET_UPVALUE` instead, which gets handled a bit differently, but that is for the VM docs. If it isn't that either, then we emit it as a global, and the VM will look it up in the globals hashmap at runtime. <br />
+
+Getting slightly more complicated now:
+
+```c++
+case EXPR_ASSIGN:
+{
+	compileExpressionByte(expr->var_assignment.value, parser, vmChunk, compiler, vm);
+	int slot = resolveLocal(compiler, expr->var_assignment.name, expr->var_assignment.length);
+	if (slot != -1)
+	{
+		emitBytes(OP_SET_LOCAL, (uint8_t)slot, vmChunk, parser, vm);
+	}
+	else
+	{
+		int upVal = resolveUpvalue(compiler, expr->var_assignment.name, expr->var_assignment.length);                  //look for upval
+		if (upVal != -1) { emitBytes(OP_SET_UPVALUE, (uint8_t)upVal, vmChunk, parser, vm); }   //emit getting it to the vm
+		else {emitSetGlobal(expr->var_assignment.name, expr->var_assignment.length, vmChunk, parser, vm);} //otherwise just set the local var
+	}
+	break;
+}
+```
+*Found in /src/Bytecompiler.c*
+
+Assignment is once again a little bit tricky, because we handle local and global variables differently. We mostly go through the same song and dance though. First we compile the **new value**, so it ends up on top of the stack, and then we run through the locals array to see which kind of variable we are assigning to. <br />
+
+If we are in fact a local, then we know we exist on the stack, so to change the value, the VM just overwrites that slot in the stack with the new value at runtime. Of course, this happens in the VM, and we only emit the instructions for it, nothing is actually changed here in the bytecode compiler. There is no VM or stack here yet, it is just what we plan for. <br />
+
+Now, once again, if we aren't a local, we check if we are an upvalue. If so, the variable belongs to the stack window of an enclosing function (or has already been moved off of the stack), so the VM needs a different instruction to reach it, `OP_SET_UPVALUE`. Otherwise, we tell the VM to just update the value in the globals hashmap. <br />
+
+Now time for the real meat of this entire switch case:
+
+```c++
+case EXPR_CALL:
+{
+	if (expr->objectCall.callee->type == EXPR_PULLF)
+	{
+		emitGetLocal(0, vmChunk, parser, vm); // push 'this'
+		for (int i = 0; i < expr->objectCall.argCount; i++)
+		{
+			compileBytecode(expr->objectCall.args[i], parser, vmChunk, compiler, vm);
+		}
+		ObjString* name = copyString(expr->objectCall.callee->pullf.methodName, expr->objectCall.callee->pullf.nameLength, vm);
+		uint8_t nameIndex = addConstant(vmChunk, CREATE_OBJECT_VAL((Obj*)name), vm);
+		emitByte(OP_SUPER_INVOKE, vmChunk, parser, vm);
+		emitByte(nameIndex, vmChunk, parser, vm);
+		emitByte((uint8_t)expr->objectCall.argCount, vmChunk, parser, vm);
+		break;
+	}
+
+	//check to see if the call is happening from a GET_FIELD in a class (bascically a method call)
+	if (expr->objectCall.callee->type == EXPR_GET_FIELD)
+	{
+		//compile instance and the given arguements
+		compileBytecode(expr->objectCall.callee->getField.callee, parser, vmChunk, compiler, vm);
+		for (int i = 0; i < expr->objectCall.argCount; i++)
+		{
+			compileBytecode(expr->objectCall.args[i], parser, vmChunk, compiler, vm);
+		}
+		//emit OP_INVOKE
+		ObjString* name = copyString(expr->objectCall.callee->getField.fieldName, expr->objectCall.callee->getField.fieldLenght, vm);
+		uint8_t nameIndex = addConstant(vmChunk, CREATE_OBJECT_VAL((Obj*)name), vm);
+		emitByte(OP_INVOKE, vmChunk, parser, vm);
+		emitByte(nameIndex, vmChunk, parser, vm);
+		emitByte((uint8_t)expr->objectCall.argCount, vmChunk, parser, vm);
+		break;
+	}
+
+	//plain call path
+	compileExpressionByte(expr->objectCall.callee, parser, vmChunk, compiler, vm);
+	for (int i = 0; i < expr->objectCall.argCount; i++)
+	{
+		compileExpressionByte(expr->objectCall.args[i], parser, vmChunk, compiler, vm);
+	}
+	emitBytes(OP_CALL, (uint8_t)expr->objectCall.argCount, vmChunk, parser, vm);
+	break;
+}
+```
+*Found in /src/Bytecompiler.c*
+
+This single case for sure took a few years off of my life. I will actually explain it from the bottom up, since things sort of build on each other in that order. <br />
+
+The very bottom of the switch case is the **plain call path**. This is for anything that can be called, generally a function, or even a class for creating a class instance. It is very simple, because the difference between calling different things is actually handled at runtime, not here. We compile the thing being called, then compile each of the arguments passed into the call, so they all end up on the stack, and then emit the `OP_CALL` opcode itself, along with the number of arguments. <br />
+
+This may seem like a bit much, but in the case of a function call, for example, all of the arguments get put on the stack one by one, and then they are used as the function's local variables once we switch into the context of the function itself. <br />
+
+Now, moving above that, in the middle of the switch case we check if the call is happening on a `GET_FIELD`, which means the user is trying to call a method of a class. This gets treated differently from a regular function call, because the VM needs to find the method on the class that the instance belongs to. We still go through the song and dance of emitting all of the arguments, but first we compile the **instance** itself, and instead of `OP_CALL` we emit `OP_INVOKE`, followed by the **name of the method** (stored as a constant) and the number of arguments. <br />
+
+Lastly, at the top, we handle a call to a parent's method with `pullf`. This is a lot like the regular `OP_INVOKE` that we just did, the only difference being that the method has to be found on the **super class** of the current class. Here we push `this` (which always lives in slot `0` of a method) as the instance, emit the arguments, and then `OP_SUPER_INVOKE` with the method name and argument count. The VM handles getting to the super class at runtime. It overall gets to be a lot.
+
+## The Rest of the Cases
+
+The rest of the cases follow the exact same ideas, just with different opcodes. Arrays compile each of their elements and then emit `OP_CREATE_ARRAY` with how many elements there are, fields compile the instance and then emit `OP_GET_FIELD` or `OP_SET_FIELD` with the name of the field, and `this` is just `OP_GET_LOCAL 0`. <br />
+
+The one worth showing is `&&`, because this is where the short circuiting that was mentioned on the AST Compiler page actually happens:
+
+```c++
+case EXPR_AND:
+{
+    compileExpressionByte(expr->andExpr.left, parser, vmChunk, compiler, vm);
+    int endJump = emitJump(OP_JUMP_IF_FALSE, vmChunk, parser, vm);
+    emitByte(OP_POP, vmChunk, parser, vm);
+    compileExpressionByte(expr->andExpr.right, parser, vmChunk, compiler, vm);
+    patchJump(endJump, vmChunk, parser);
+    break;
+}
+```
+*Found in /src/Bytecompiler.c*
+
+We compile the left side, and then, using that same `emitJump()` from earlier, we jump right over the right side if the left side was `false`. If we don't jump, we pop the left side's value and let the right side decide the answer. `||` works the same way, just jumping when the left side is `true`. <br />
+
+Lastly, the AST Compiler never actually calls `compileExpressionByte()` directly. It calls `compileBytecode()`, which right now is just a small wrapper around it:
+
+```c++
+void compileBytecode(Expr* expr, ASTparser* parser, Chunk* vmChunk, AstCompiler* compiler, Vm* vm)
+{
+    //TODO: add in a way to seperate consequtive expressions from return call
+    compileExpressionByte(expr, parser, vmChunk, compiler, vm);
+}
+```
+*Found in /src/Bytecompiler.c*
+
+## What It All Turns Into
+
+So what does all of this actually look like once it is done? Here is a small program:
+
+```java
+#pullf io
+make int x = 2 + 3;
+println(x);
+```
+
+And here is the bytecode it turns into, printed using the `disassembleInstruction()` function from `/src/debug.c`:
+
+```
+0000    2 OP_CONSTANT         0 '2'
+0002    | OP_CONSTANT         1 '3'
+0004    | OP_ADD
+0005    | OP_DEFINE_GLOBAL    2 'x'
+0007    3 OP_GET_GLOBAL       3 'println'
+0009    | OP_GET_GLOBAL       4 'x'
+0011    | OP_CALL             1
+0013    | OP_POP
+0014    | OP_RETURN
+```
+
+The first column is the position in the bytecode array, the second is the line of source code it came from (a `|` means the same line as before), and then comes the instruction itself, along with any extra bytes it has, like the index into the constant array and the value stored there. <br />
+
+You can see everything from this page in there. The two `OP_CONSTANT`s and the `OP_ADD` are the binary expression, compiled from the bottom up. `OP_DEFINE_GLOBAL` stores it as `x`. Then the call pushes the function, then its argument, and then `OP_CALL 1`. The `OP_POP` throws away the result of the expression statement, and the `OP_RETURN` at the very end is the end of the top level `<script>` function. <br />
+
+*Cool Note:* If you turn on `DEBUG_TRACE_EXECUTION` in `/include/common.h`, the VM uses this same function to print out every single instruction as it runs, along with the expression debug prints from above. Fair warning though, it prints a LOT.
+
+## Where to Go Next
+
+And that is the bytecode compiler! It is the last stop for your code before it actually runs. Every expression has been scanned, built into a tree, type checked, and now flattened down into a list of very small instructions. Now all that is left is to actually run them, which is the job of the [Virtual Machine](https://olinat.net/docs/system-design/virtualmachine).

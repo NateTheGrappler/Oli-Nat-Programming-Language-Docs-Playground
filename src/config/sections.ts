@@ -120,10 +120,7 @@ export const sections: Section[] = [
         
         {slug: 'virtualmachine',            title: "Virtual Machine"},
         
-        {slug: 'garbage',                  title: "Garbage Collector", children: [
-            {slug: 'markSweep',      title: 'Mark-Sweep Implementation'},
-            {slug: 'lowlevelmemory', title: 'Low Level Memory Functions'},
-        ]},
+        {slug: 'garbage',                  title: "Garbage Collector"},
         
         {slug: 'dataStructures',            title: 'Key Data Structures'},
         {slug: 'functions',                 title: 'Functions & Closures'}

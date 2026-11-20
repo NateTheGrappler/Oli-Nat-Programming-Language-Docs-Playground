@@ -1,0 +1,831 @@
+# Virtual Machine Overview
+
+Alright! We are in the end zone now. The user's source code has officially gone from a regular C string, into the [scanner](https://olinat.net/docs/system-design/scanner) to be tokenized, into the [AST Compiler](https://olinat.net/docs/system-design/astCompiler) so we can add context and typing to create an **Abstract Syntax Tree**, then into the [type checker](https://olinat.net/docs/system-design/typeChecker) to make sure that all of the types in the AST are valid, and finally through the [bytecode compiler](https://olinat.net/docs/system-design/bytecodeCompiler), which turns those trees into bytecode instructions that we store in one long array. Now it's time for the payoff. <br />
+
+We have all of these instructions, and we need to actually run them, to put the instructions into action, and this is exactly what the **Virtual Machine** is. In short, the virtual machine is a giant switch case that walks the bytecode array one instruction at a time, and based on the instruction it finds, tells C to perform some action, keeping track of everything with a **stack**. <br />
+
+It is more nuanced than that of course. We have things like call frames, object storage for the garbage collector, pointer math and operations, and of course the stack itself. For now, let's just take a quick look at the VM struct itself:
+
+```c++
+typedef enum
+{
+    INTERPRET_OK,
+    INTERPRET_COMPILE_ERROR,
+    INTERPRET_RUNTIME_ERROR,
+} vmResult;
+
+typedef struct Vm
+{
+    //the stack
+    bool hadRuntimeError;
+    ObjUpValue* openUpValues;
+    Value  stack[STACK_MAX];
+    Value* stackTop;
+    CallFrame frames[FRAMES_MAX];
+    int frameCount;
+    Obj* objects;
+
+    Hashmap strings;
+    Hashmap globals;
+
+    //gc stuff
+    size_t bytesAllocated;
+    size_t nextGC;
+    int grayCapacity;
+    int grayCount;
+    Obj** grayStack;
+
+} Vm;
+```
+*Found in /include/vm.h*
+
+Here we have two things. The first is the `vmResult` enum, which is pretty self explanatory. After the VM stops running the bytecode, we need to know if everything was okay, or if there was a compile or runtime error. This lets us end our program correctly, and ties into the error system with all of the messages we have been creating throughout this entire process. <br />
+
+The actually interesting thing here is of course the `Vm` struct itself. There are really three main sections, the way I have them split up, though it would not be a stretch to say there are four:
+
+1. First, we have the actual **stack** at the top. The stack is just a single array with a pointer to the top of it, which walks forward or backward as we push or pop elements. This is what `stack[STACK_MAX]` and `stackTop` represent. Notice that the stack is just an array of `Value`s, which is Oli-Nat's representation of values, and that includes objects, so we can fit functions, strings, and what not on it as well.
+
+2. We also have `frames[FRAMES_MAX]`, which represents all of the different function calls that are currently running. Each frame is a sort of **window** on the stack, belonging to one function call, and it is how each function gets its own local variables. Originally, everything ran in just one frame, but functions and closures changed this, and more on that can be found in the [Functions & Natives](https://olinat.net/docs/system-design/functions) section of the docs.
+
+3. `Hashmap strings, globals` are exactly what they sound like. They are the runtime home of **string interning**, and of all of the **global variables**, functions, and class declarations. Globals have the same lifetime as the VM itself, so they are better stored here than in the mess of the stack.
+
+4. All the rest, like `Obj* objects`, `Obj** grayStack`, and the internal counters, are for the garbage collector. We need to keep track of ALL of the different objects that the user allocates, and the VM exists for the program's whole runtime, so we store them here in a linked list. Once again, this is out of scope for this documentation, it is only held in the VM, and is better described in the [Garbage Collector](https://olinat.net/docs/system-design/markSweep) docs.
+
+# Helper Functions
+
+## The Stack
+
+Before getting into the giant switch case, I think it would actually be best to first go through some of the helper functions, just like in the type checker and bytecode compiler documentation, so that by the time we get to the switch case, a lot of the context is already there. For starters, here are the stack functions:
+
+```c++
+void push(Vm* vm, Value value)
+{
+    //check for stack overflow
+    if (vm->stackTop - vm->stack >= STACK_MAX) {
+        runtimeError(vm, "Too many constants added onto program's stack", "STACK OVERFLOW ERROR");
+        return;
+    }
+    *vm->stackTop = value;
+    vm->stackTop++;
+}
+Value pop(Vm* vm)
+{
+    vm->stackTop--;
+    return *vm->stackTop;
+}
+Value peek(Vm* vm, int distance)
+{
+    return vm->stackTop[-1 - distance];
+}
+```
+*Found in /src/vm.c*
+
+This is all very simple stuff, I mean it is just a basic stack. To add an item, we make sure we have enough room, then we dereference the pointer, store the value, and move the pointer forward. To remove something, we move the pointer back, and return what it is now pointing at. And if we need to `peek`, we just look backwards from the pointer by however far we want, without removing anything. <br />
+
+As simple as this is, it is the entire stack, and it gives us a lot of power. Popping never actually erases anything, we just move the pointer back, and the next push simply overwrites whatever was left there. The `peek` lets us look at values without taking them off the stack, which a lot of instructions rely on, like finding the function being called underneath its arguments, or keeping a value safe on the stack while the garbage collector might run. <br />
+
+## Error Handling
+
+Error handling in the VM is especially important. While it is the job of the compiler, and especially the type checker, to catch as many bugs as possible during compile time, you never know what the user will actually write, so an error during runtime needs to be graceful. <br />
+
+```c++
+void runtimeError(Vm* vm, const char* message, const char* messageType)
+{
+    vm->hadRuntimeError = true;
+    fprintf(stderr, ":>>  %s -- ", messageType);
+    fprintf(stderr, "%s\n", message);
+
+    fprintf(stderr, "Stack trace:\n");
+    for (int i = vm->frameCount - 1; i >= 0; i--)
+    {
+        CallFrame* frame = &vm->frames[i];
+        ObjFunction* function = frame->closure->function;
+
+        int instruction = (int)(frame->ip - function->chunk.byteCode - 1);
+        if (instruction < 0) instruction = 0;
+        int line = function->chunk.lines[instruction];
+
+        fprintf(stderr, "  [line %d] in ", line);
+        if (function->nameLength == 0 || function->name == NULL)
+        {
+            fprintf(stderr, "<script>\n");
+        }
+        else
+        {
+            fprintf(stderr, "%.*s()\n", function->nameLength, function->name);
+        }
+    }
+}
+```
+*Found in /src/vm.c*
+
+A runtime error is dangerous because we are actively running the program. This is when things are most likely to go wrong, so first and foremost we set the `hadRuntimeError` boolean. Most instructions just return `INTERPRET_RUNTIME_ERROR` right after calling this, which stops the switch case, but the flag is how we find out that something went wrong *inside of a native function*, since those are plain C functions that can't return an error code themselves. <br />
+
+After this, it is a matter of actually telling the user what went wrong. A compile time error is usually about syntax or types, so we can just point at the problem. Runtime errors, though, are most often **logic errors**, so we give the user as much information as we can to help them understand the logic of their code. <br />
+
+Oli-Nat does in large part what a language like Java does: we print a **stack trace** of all of the function calls that are active at the time of the error, along with the line each one was on. Finding that line takes a bit of pointer math, as we can see. We work out how far each frame's instruction pointer is into its bytecode, and look up that position in the chunk's `lines` array, but generally we just walk the frames array.
+
+## Calls and Native Functions
+
+### Natives
+
+I will start off with native functions, just because they are a bit strange and all over the place. A native function is just a C function that I PERSONALLY wrote, which the user's program has access to whenever it needs it. How do we run C code in Oli-Nat though? <br />
+
+Well, natives are not loaded in unless they are asked for with `#pullf`. When the compiler sees a `#pullf`, it registers the natives' signatures with the type checker, so it knows how to check calls to them, but they still need a place to exist during runtime. So we toss them into the globals hashmap:
+
+```c++
+static void defineNative(Vm* vm, const char* name, NativeFn function)
+{
+    //create new native, intern it's name, and toss it into globals
+    ObjNative* native = newNative(function, name, strlen(name), vm);
+    push(vm, CREATE_OBJECT_VAL((Obj*)native));
+
+    ObjString* nameStr = copyString(name, (int)strlen(name), vm);
+    push(vm, CREATE_OBJECT_VAL((Obj*)nameStr));
+
+    MapSet(&vm->globals, nameStr, CREATE_OBJECT_VAL((Obj*)native), vm);
+    pop(vm);
+    pop(vm);
+}
+
+void registerIONatives(Vm* vm)
+{
+    defineNative(vm, "print", printNative);
+    defineNative(vm, "println", printlnNative);
+    defineNative(vm, "intake", intakeNative);
+}
+```
+*Found in /src/vm.c*
+
+So, a native function is created as an internal Oli-Nat object (an `ObjNative`, see the object documentation for what it looks like). We then push the native onto the stack, and push its name onto the stack too. This is so the garbage collector doesn't free either of them while we are still allocating, since neither one is reachable from anywhere else yet. Then we store the native in the globals hashmap under its interned name, and pop both back off. <br />
+
+We do this for every single native function in the library being pulled in, so we have a bunch of helper functions that group together the natives loaded by each `#pullf`. The one showcased above is for the standard `I/O` to the terminal. It is small, only three functions, but each line takes the pointer to the C function and the name of the function, so they can all be called freely! It is a bit verbose for a simple feature, but this structure allows a lot of modularity between all of the different natives, which became very useful once I actually added a large standard library. <br />
+
+*Cool Note:* Since natives live in the globals hashmap, calling `println` at runtime is exactly the same as calling a global function you wrote yourself, it is an `OP_GET_GLOBAL` followed by an `OP_CALL`. The difference only shows up once we get inside of `callValue()` below.
+
+### Calls
+
+Calls themselves are mostly handled during runtime, because it is FAR easier than having to figure out what is being called during compile time. It is a small tradeoff for what would probably have been months of my life, and I am willing to take it:
+
+```c++
+static bool callValue(Value callee, int argCount, Vm* vm)
+{
+    if (IS_OBJECT(callee))
+    {
+        switch (GET_OBJECT_VAL(callee)->type)
+        {
+            case OBJ_CLOSURE:
+            {
+                ObjClosure* closure = (ObjClosure*)GET_OBJECT_VAL(callee);
+                return call(closure, argCount, vm);;
+            }
+            case OBJ_NATIVE:
+            {
+                ObjNative* native = (ObjNative*)GET_OBJECT_VAL(callee);
+                Value result = native->function(argCount, vm->stackTop-argCount, vm);
+
+                //add check for incorrect returns in native functions so runtime errors perk
+                if (vm->hadRuntimeError) return false;
+
+                vm->stackTop -= argCount + 1;
+                push(vm, result);
+                return true;
+            }
+            case OBJ_CLASS:
+            {
+                ObjClass* class = (ObjClass*)GET_OBJECT_VAL(callee);
+                push(vm, CREATE_OBJECT_VAL((Obj*)class)); //anchor against gc (istg)
+                ObjInstance* instance = newInstance(class, vm);
+                pop(vm); //pop off stack
+                vm->stackTop[-argCount - 1] = CREATE_OBJECT_VAL((Obj*)instance);
+
+
+                if (class->constructor != NULL)
+                {
+                    return call(class->constructor, argCount, vm);
+                }
+                else
+                {
+                    if (argCount != 0)
+                    {
+                        runtimeError(vm, "This class has no constructor but arguments were passed.", "RUNTIME ERROR");
+                        return false;
+                    }
+                }
+                return true;
+            }
+            default:
+            {
+                runtimeError(vm, "Undefined calling object, how did you get here?", "SYNTAX ERROR");
+                return false;
+            }
+        }
+    }
+    runtimeError(vm, "You can only call functions.", "LOGIC ERROR");
+    return false;
+}
+```
+*Found in /src/vm.c*
+
+When we run into an `OP_CALL` opcode inside of the VM, we know that the thing being called is sitting on the stack, right **underneath** all of its arguments (which is why `OP_CALL` finds it with `peek(vm, argCount)`). It can generally be one of three things:
+
+1. A **closure**. This is a regular function call, since all functions are closures anyways. This is really the most basic case, all we need to do is turn the object on the stack into an `ObjClosure`, so we have access to all of the properties we need to then `call()` it.
+
+2. A **native function**, which is really, really similar to a regular function call, but treated a bit more like a nuclear weapon. We still turn it into the proper object type, but then we grab the C pointer to the native function, and call it right away, passing in a pointer to its arguments on the stack. We then check that nothing went wrong (that `hadRuntimeError` flag from earlier), pop the arguments and the native itself off of the stack, and push the result in their place. Natives never get a call frame, they just run and are done.
+
+3. Lastly, a **class**. Calling a class means that the user wants to create a class instance. This is where we actually need a bit of logic. We create a new instance, safe guarding against the GC because this is a new allocation, and then put the instance in the class's spot on the stack. That spot becomes slot `0` of the constructor's frame, which is exactly where `this` lives. Then, if the class has a constructor we call it, and if it doesn't, we make sure that no arguments were passed.
+
+This is basically just figuring out what the hell we are actually calling, but the main call actually happens in another function, aptly called:
+
+```c++
+static bool call(ObjClosure* closure, int argCount, Vm* vm)
+{
+    if (argCount != closure->function->arity)
+    {
+        runtimeError(vm, "Function call got either more or less arguements than expected.", "INVALID CALL ERROR");
+        return false;
+    }
+    if (vm->frameCount == FRAMES_MAX) {
+        runtimeError(vm, "Too many function calls deep.", "STACK OVERFLOW ERROR");
+        return false;
+    }
+
+    CallFrame* frame = &vm->frames[vm->frameCount++];
+    frame->closure = closure;
+    frame->ip = closure->function->chunk.byteCode;
+    frame->slots = vm->stackTop - argCount - 1;
+    return true;
+}
+```
+*Found in /src/vm.c*
+
+The `call()` function is basically just a case abstracted out of the switch statement, because we first needed to check what it was that we were calling. There are a few things here. <br />
+
+The first two are checks to make sure there is no runtime error. The first one checks the `arity` of the function, which is the number of parameters it was declared with. This means that the number of arguments a function takes in Oli-Nat is final, there is no support for multiple definitions of the same function. Second, we check if we are more than the allowed number of frames deep (`FRAMES_MAX`, which is `64`), which is the definition of a **stack overflow**. <br />
+
+Once we know neither of those is a problem, we push a new frame. Here is what a frame is:
+
+```c++
+typedef struct
+{
+    ObjClosure* closure;
+    uint8_t* ip;
+    Value* slots;
+} CallFrame;
+```
+*Found in /include/vm.h*
+
+Running a new function is basically running a new bytecode array, so we just change where the `ip` (the **instruction pointer**) is looking, to the start of that function's bytecode. This lets us reuse functions as many times as we want without much strain on memory, it is just a pointer change. Then `slots` marks where this function's window starts on the stack, right at the function being called, followed by its arguments. That is why the arguments of a function become its first local variables, they are already sitting in the right slots! <br />
+
+# VM Run Function
+
+Now, everything up until now has really been calm cookies. The actual `run()` function is the main switch case that handles every possible instruction from the bytecode array. This single function is arguably one of the biggest in the entire codebase, so I cannot explain every bit of it here, but I will try my best to paint a good picture:
+
+```c++
+static vmResult run(Vm* vm)
+{
+    CallFrame* frame = &vm->frames[vm->frameCount - 1];
+#define READ_BYTE() (*frame->ip++)
+#define READ_CONSTANT() (frame->closure->function->chunk.constants.values[READ_BYTE()]) //get the stored index in the chunk buffer and then index into the chunk's stored values
+#define READ_CONSTANT_LONG() (frame->closure->function->chunk.constants.values[READ_SHORT()])
+#define READ_SHORT() (frame->ip += 2, (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))
+
+
+    //the main meat of it all baby
+    for (;;)
+    {
+        #ifdef DEBUG_TRACE_EXECUTION
+                //print the stack info for the current byte that youre on, starting from bottom of the stack to the top
+                printf("Stack Info:     ");
+                int stackSize= 0;
+                for (Value* slot = vm->stack; slot < vm->stackTop; slot++) {
+                    printf("[ ");
+                    printValue(*slot);
+                    printf(" ]");
+                    stackSize+=1;
+                }
+                printf("\n");
+                printf(("Stack Size: %d"), stackSize);
+                printf("\n");
+                disassembleInstruction(&frame->closure->function->chunk, (int)(frame->ip - frame->closure->function->chunk.byteCode));
+        #endif
+
+        uint8_t instruction;
+        switch (instruction = READ_BYTE())
+        {
+        //...
+        }
+//...
+```
+*Found in /src/vm.c*
+
+This is everything that comes before the actual switch case. Inside of the loop, it really isn't much more than a bunch of debugging code, which prints out the whole stack alongside the instruction about to run. While it does not serve any purpose in production, it was my lifeline during development. <br />
+
+We do have some useful stuff up top though, otherwise I would not include it. There are a LOT of macros defined here:
+
+1. `#define READ_BYTE() (*frame->ip++)` reads the current byte of the bytecode array, and moves the instruction pointer on to the next one.
+2. `#define READ_CONSTANT() (frame->closure->function->chunk.constants.values[READ_BYTE()])` goes into the current function's chunk, and uses the index stored in the bytecode array to get the actual literal `Value` that we stored there during compilation.
+3. `#define READ_SHORT() (frame->ip += 2, (uint16_t)((frame->ip[-2] << 8) | frame->ip[-1]))` uses a bit of bit math to read two of our bytes as one single value. This is used for the jump distances in control flow, and for `READ_CONSTANT_LONG()`, which is the same as `READ_CONSTANT()`, but with a two byte index for `OP_CONSTANT_LONG`.
+
+## Constants and Unary Operations
+
+Getting on with the actual implementation, here are a bunch of the short operations, starting with how we actually get any values onto the program's stack, so we can start doing the more fun stuff.
+
+```c++
+case OP_CONSTANT:
+{
+	Value constant = READ_CONSTANT();
+	push(vm, constant);
+	break;
+}
+case OP_CONSTANT_LONG:
+{
+	Value constant = READ_CONSTANT_LONG();
+	push(vm , constant);
+	break;
+}
+```
+*Found in /src/vm.c*
+
+When we read an `OP_CONSTANT` opcode, we know that the next byte in the bytecode array is the index of that constant in the current function's chunk's value array. The constant is also already stored as a `Value`, the internal way Oli-Nat handles values, so we just need to index it. <br />
+
+We read the index with one of the macros, grab the value, and push it right onto the stack for whatever operation needs it. For example, a unary operation:
+
+```c++
+case OP_NEGATE:
+{
+	Value constant = pop(vm);
+	if (IS_FLOAT(constant))
+	{
+		push(vm, CREATE_FLOAT_VAL(-GET_FLOAT_VAL(constant)));
+	}
+	else if (IS_DOUBLE(constant))
+	{
+		push(vm, CREATE_DOUBLE_VAL(-GET_DOUBLE_VAL(constant)));
+	}
+	else if (IS_INT(constant))
+	{
+		push(vm, CREATE_INT_VAL(-GET_INT_VAL(constant)));
+	}
+	break;
+}
+case OP_INVERSE:
+{
+	Value constant = pop(vm);
+	if (IS_BOOL(constant))
+	{
+		push(vm, CREATE_BOOL_VAL(!GET_BOOL_VAL(constant)));
+	}
+	break;
+}
+```
+*Found in /src/vm.c*
+
+As you can see, the unary operation pops the value that was just pushed onto the stack (by an `OP_CONSTANT`, or whatever expression came before it), and then in a single line turns it into a raw C value for a moment, applies the simple unary operation, turns it right back into the internal Oli-Nat `Value`, and pushes it back onto the stack!
+
+## Basic Math and Binary Operations
+
+Basic math operations work the same way for all of the standard `+ - * /` operators. In all honesty, every binary operation follows this pattern, even `==, !=, <, >, >=, <=`. <br />
+
+We are lucky, because we know there are no type errors at this point, so we never need to report one here. The only thing we do need to handle is type promotion, which does kind of suck:
+
+```c++
+case OP_ADD:
+{
+	Value b = pop(vm);
+	Value a = pop(vm);
+
+	if (IS_INT(a) && IS_INT(b))
+	{
+		push(vm, CREATE_INT_VAL(GET_INT_VAL(a) + GET_INT_VAL(b)));
+	}
+	else if (IS_DOUBLE(a) || IS_DOUBLE(b))
+	{
+		double da = IS_DOUBLE(a) ? GET_DOUBLE_VAL(a) : (double)GET_INT_VAL(a);
+		double db = IS_DOUBLE(b) ? GET_DOUBLE_VAL(b) : (double)GET_INT_VAL(b);
+		push(vm,  CREATE_DOUBLE_VAL(da + db));
+	}
+	else if (IS_FLOAT(a) || IS_FLOAT(b))
+	{
+		float fa = IS_FLOAT(a) ? GET_FLOAT_VAL(a) : (float)GET_INT_VAL(a);
+		float fb = IS_FLOAT(b) ? GET_FLOAT_VAL(b) : (float)GET_INT_VAL(b);
+		push(vm,  CREATE_FLOAT_VAL(fa + fb));
+	}
+	else if (IS_STRING(a) && IS_STRING(b))
+	{
+		concatenate(vm, b, a);
+	}
+	break;
+}
+```
+*Found in /src/vm.c*
+
+In any binary operation, we pop the two values off of the stack (note that it is `b` before `a`, because the right side was pushed last, so it is on top), and then we check what types these values are. <br />
+
+You may ask, why are we checking types during runtime? Isn't that what the type checker was for? In part you are correct, but these macros are nowhere near the same intensive process that type checking was. Most of the work was already done, so here we just read the type tag of each `Value`, and based on it, convert the `Value` into the right raw C value so we can operate on it. <br />
+
+Doing so lets C do the real underlying work for the addition or whatever it is, and then we turn the result right back into an internal Oli-Nat value, which we gladly push onto the stack for whatever comes next, whether that is more math, an assignment, or something else.
+
+## Variable Definition and Assignment
+
+The past two sections cover nearly half of the actual cases in the VM. Most of a program is made up of expressions anyways, so it makes sense if you really think about it. Things get a bit different for variables though.
+
+### Global Definition and Assignment
+
+To define a global value:
+
+```c++
+case OP_DEFINE_GLOBAL:
+{
+	//just change the top val on the stack in map then pop it off
+	Value constant = READ_CONSTANT();
+	ObjString* name = AS_STRING(constant);
+	MapSet(&vm->globals, name, peek(vm, 0), vm);
+	pop(vm);
+	break;
+}
+```
+*Found in /src/vm.c*
+
+The definition of a global is very simple. Every single variable has to be defined with some sort of expression. Functions and classes are a bit different, but the main point is that for any define operation, there is always a value on the top of the stack that the variable gets assigned to. <br />
+
+So here, we just define the global in the hashmap, using the name that comes right after the `OP_DEFINE_GLOBAL` opcode, and take a `peek` at what the actual value on the stack is. We only pop the value *after* it is safely in the hashmap, since `MapSet()` might allocate memory, and we don't want the garbage collector to free the value in the middle of that. This way the global exists for the entire lifetime of the program, and can be changed and accessed anywhere. Speaking of which, here is the access instruction:
+
+```c++
+case OP_GET_GLOBAL:
+{
+	//get the global name and toss it into the global vars map
+	ObjString* name = AS_STRING(READ_CONSTANT());
+	Value value;
+	if (!MapGet(&vm->globals, name, &value))
+	{
+		printf("Global not found: %.*s\n", name->length, name->chars);
+		runtimeError(vm, "Undefined Global variable.", "RUNTIME ERROR");
+		return INTERPRET_RUNTIME_ERROR;
+	}
+	push(vm, value);
+	break;
+}
+```
+*Found in /src/vm.c*
+
+Getting a global is once again a pretty simple endeavour. Thanks to all of the hard work from the bytecode compiler, we know that what gets emitted after the opcode is just the index of the constant holding the name of our global variable. <br />
+
+Coincidentally (not), we store everything in the globals hashmap by name, so whenever we need the value of the variable, all we do is read the name, call the `MapGet()` function for our hashmap, making sure the variable actually exists, and then push the value onto the stack. <br />
+
+For actually changing the value, the process is surprisingly similar:
+
+```c++
+case OP_SET_GLOBAL:
+{
+	Value constant = READ_CONSTANT();
+	ObjString* name = AS_STRING(constant);
+	if (MapSet(&vm->globals, name, peek(vm, 0), vm))
+	{
+		printf("Undefined variable '%s'\n", name->chars);
+		runtimeError(vm, "Undefined global variable.", "RUNTIME ERROR");
+		return INTERPRET_RUNTIME_ERROR;
+	}
+	break;
+}
+```
+*Found in /src/vm.c*
+
+Once again we get the name from the bytecode array, and then use the built in set function to index into our hash table by name, where we can just change the value outright, very convenient. Notice we only `peek` the new value and never pop it. An assignment is an expression, so its value stays on the stack, in case something like `x = y = 5` needs it. <br />
+
+Of course, as always when indexing into a hashmap, especially during runtime, we need to make sure the thing we are indexing actually exists, otherwise we have a clear logic error. `MapSet()` returns `true` when it had to create a **brand new** entry, which here means that the variable was never defined in the first place.
+
+### Local Definition and Assignment
+
+Things are a lot simpler for locals in practice, but much harder to grasp in theory, in my opinion at the very least. The reason is that the AST compiler keeps track of all of the locals using that chain of compilers (see the AST Compiler docs for more info). <br />
+
+Because of this, we always know exactly where a local is on the stack, relative to the start of its function's frame, so we can just access it directly:
+
+```c++
+case OP_SET_LOCAL:
+{
+	uint8_t slot = READ_BYTE();
+	frame->slots[slot] = peek(vm, 0);
+	break;
+}
+case OP_GET_LOCAL:
+{
+	uint8_t slot = READ_BYTE();
+	push(vm, frame->slots[slot]);
+	break;
+}
+```
+*Found in /src/vm.c*
+
+We just read which slot it is, and then use the window of the frame that we are in to either update the value that exists there, or push a copy of it. The local already exists on the stack, so there is no need for a definition like there is with globals. This makes the code trivially short, but only because of all of the hard work that went into the AST Compiler.
+
+## Creating and Indexing Arrays
+
+Arrays are one of the first places where the VM has to actually create something, instead of just moving values around:
+
+```c++
+case OP_CREATE_ARRAY:
+{
+	int arrayCount = READ_BYTE();
+	ValueType arrayType = (ValueType)READ_BYTE();
+	ObjStaticArray* newArray = newStaticArray(arrayCount, arrayType, vm);
+
+	for (int i = arrayCount - 1; i >= 0; i--)
+	{
+		newArray->values[i] = pop(vm);
+	}
+	push(vm, CREATE_OBJECT_VAL((Obj*)newArray));
+	break;
+}
+```
+*Found in /src/vm.c*
+
+By the time we reach `OP_CREATE_ARRAY`, the bytecode compiler has already pushed every element of the array onto the stack, one after the other. So we read how many elements there are, and the type of the array, and allocate a brand new `ObjStaticArray` to hold them. <br />
+
+Then we pop each element off of the stack and put it into the array. Notice that we fill it in **backwards**, starting from the last index. The last element was pushed last, so it is on the top of the stack, and comes off first. Finally, the whole array goes back onto the stack as a single object. <br />
+
+Getting a value out of an array looks like this:
+
+```c++
+case OP_GET_ARRAY_INDEX:
+{
+	Value indexval = pop(vm);
+	Value arrayVal = pop(vm);
+	int index = GET_INT_VAL(indexval);
+
+	ObjStaticArray* array = (ObjStaticArray*)GET_OBJECT_VAL(arrayVal);
+	if (index < 0 || index >= array->length)
+	{
+		runtimeError(vm, "You cannot index outside of an array's defined size", "OUT OF BOUNDS ERROR");
+		return INTERPRET_RUNTIME_ERROR;
+	}
+
+	push(vm, array->values[index]);
+	break;
+}
+```
+*Found in /src/vm.c*
+
+We pop the index and the array, turn the array back into an `ObjStaticArray`, and push the value at that index. Setting an index is the same thing, just with one extra value popped off first, the new value. <br />
+
+This is one of the few spots where the VM really has to check for errors itself. The type checker can make sure that the index is an `int`, but it has no way of knowing whether that `int` will be `3` or `300` when the program actually runs. So we check the bounds here, and if you go outside of the array, you get an `OUT OF BOUNDS ERROR` instead of C happily reading whatever memory sits past the end of the array.
+
+# Control Flow
+
+Back on the AST Compiler page, we talked about how control flow is just jumping around in the bytecode array, and how the compiler back-patches the distance of every jump. Here is the other half of that, actually doing the jumping:
+
+```c++
+case OP_JUMP:
+{
+	uint16_t offset = READ_SHORT();
+	frame->ip += offset;
+	break;
+}
+case OP_JUMP_IF_FALSE:
+{
+	uint16_t offset = READ_SHORT();
+   if (!GET_BOOL_VAL(peek(vm, 0))) frame->ip += offset;
+	break;
+}
+case OP_LOOP:
+{
+	uint16_t offset = READ_SHORT();
+	frame->ip -= offset;
+	break;
+}
+```
+*Found in /src/vm.c*
+
+That really is it. Remember that `frame->ip` is just a pointer to the next instruction we are going to run, so jumping is nothing more than moving that pointer. `OP_JUMP` reads the two byte distance with `READ_SHORT()` and moves the pointer forward, `OP_LOOP` moves it backward, and `OP_JUMP_IF_FALSE` only moves it if the value on top of the stack is `false`. <br />
+
+Notice that `OP_JUMP_IF_FALSE` only `peek`s at the condition, it does not pop it. That is why the AST compiler emits an `OP_POP` on both sides of an `if`, and it is also what makes `&&` and `||` work, since the left side's value has to stay on the stack in case it ends up being the answer. <br />
+
+The other kind of control flow is leaving a function, with `OP_RETURN`:
+
+```c++
+case OP_RETURN:
+{
+	#ifdef DEBUG_TRACE_EXECUTION
+		printf("ran inside of return\n");
+	#endif
+
+	Value functionReturn = pop(vm);
+
+	//instead of returning whatever the return is for a constructor, return the class instance instead
+	if (frame->closure->function->isConstructor)
+	{
+		functionReturn = frame->slots[0];
+	}
+
+	closeUpvalues(vm, frame->slots);
+	vm->frameCount--;
+
+	if (vm->frameCount == 0)
+	{
+		return INTERPRET_OK;
+	}
+
+	vm->stackTop = frame->slots;
+	push(vm, functionReturn);
+	frame = &vm->frames[vm->frameCount - 1];
+	break;
+}
+```
+*Found in /src/vm.c*
+
+We pop the return value off of the stack first. If this function is a constructor, we throw that away and return the instance sitting in slot `0` instead (this is how calling a class gives you back an instance). Then we close any upvalues that point into this frame, so closures can keep using those variables after the function is gone (see [Functions & Natives](https://olinat.net/docs/system-design/functions)). <br />
+
+Then we drop the frame. If that was the very last frame, the top level `<script>`, then the whole program is done, and we return `INTERPRET_OK`. Otherwise, we throw away the function's entire window on the stack in one go, by moving `stackTop` back to where the window started, push the return value in its place, and switch `frame` back to the function that made the call, so it picks up right where it left off. <br />
+
+And if a function that is supposed to return something never hits a `return`, it runs into the `OP_MISSING_RETURN` tripwire that the AST compiler leaves at the end of it, which is just a runtime error.
+
+# Classes and Fields
+
+Classes are built at runtime, one instruction at a time, in the order that the AST compiler emits them. First, `OP_CLASS` creates an empty class and pushes it onto the stack, and then each method gets attached to it:
+
+```c++
+case OP_CLASS:
+{
+	Value name = READ_CONSTANT();
+	ObjClass* class = newClass(AS_STRING(name)->chars, AS_STRING(name)->length, vm);
+	push(vm, CREATE_OBJECT_VAL((Obj*)class));
+	break;
+}
+case OP_CLASS_METHOD:
+{
+	//stack holds the class object and then the method, so get it off the stack and append it to class's inner hashmap
+	Value nameVal = READ_CONSTANT();
+	ObjString* name = AS_STRING(nameVal);
+	Value method = peek(vm, 0);
+	ObjClass* class = (ObjClass*)GET_OBJECT_VAL(peek(vm, 1));
+	MapSet(&class->methods, name, method, vm);
+	pop(vm);
+	break;
+}
+```
+*Found in /src/vm.c*
+
+While the class is being built, it just sits on the stack. Each method is compiled into a closure that lands right on top of it, so `OP_CLASS_METHOD` finds the method at `peek(vm, 0)` and the class right underneath it at `peek(vm, 1)`, stores the method in the class's `methods` hashmap by name, and pops the method off. Constructors work the same way with `OP_CONSTRUCTOR`, except they are stored in `class->constructor` instead of the hashmap. <br />
+
+Fields are a little different. A **class** only stores *information* about its fields: their names, types, and default values. It is each **instance** that holds the actual values. `OP_CLASS_FIELD` records that information in the class, and then whenever you create an instance, it gets its own array of field values, starting out as copies of those defaults. <br />
+
+Inheritance is `OP_INHERIT`, which copies all of the parent's methods into the child's hashmap, and stores a pointer to the parent in `superClass`. Then, getting a field looks like this:
+
+```c++
+case OP_GET_FIELD:
+{
+	Value nameVal = READ_CONSTANT();
+	ObjString* name = AS_STRING(nameVal);
+	Value instanceVal = pop(vm);
+
+	if (!IS_OBJECT(instanceVal) || GET_OBJECT_VAL(instanceVal)->type != OBJ_INSTANCE)
+	{
+		runtimeError(vm, "Only instances of classes have fields man.", "LOGIC ERROR");
+		return INTERPRET_RUNTIME_ERROR;
+	}
+	ObjInstance* instance = (ObjInstance*)GET_OBJECT_VAL(instanceVal);
+
+	//updated to now look through the fields of the upper super classes in heritance chain
+	int slotOffset = 0;
+	int depth = 0;
+	ObjClass* current = instance->class;
+	ObjClass* chain[256];
+	while (current != NULL)
+	{
+		 //walk up to root first get right offset
+		chain[depth++] = current;
+		current = current->superClass;
+	}
+	for (int i = depth-1; i >=0; i--)
+	{
+		for (int j = 0; j < chain[i]->fieldCount; j++)
+		{
+			if (name == chain[i]->fields[j].name)
+			{
+				push(vm, instance->fields[slotOffset+j]);
+				goto done_get_field;
+			}
+		}
+		slotOffset += chain[i]->fieldCount;
+	}
+
+	Value method;
+	if (MapGet(&instance->class->methods, name, &method))
+	{
+		push(vm, method);
+		goto done_get_field;
+	}
+
+	runtimeError(vm, "Please only use defined method or field calls in your classes, no calling what doesnt exist am I right?", "RUNTIME ERROR");
+	return INTERPRET_RUNTIME_ERROR;
+
+	done_get_field:
+	break;
+}
+```
+*Found in /src/vm.c*
+
+An instance stores the fields of its **whole inheritance chain** in one single array, with the oldest parent's fields first. So to find which slot a field is in, we first walk *up* the chain to the very top class, and then search back *down* it, adding up how many fields each class has as we go (`slotOffset`). Once we find the field, its slot in the instance is that offset plus its position in that class. `OP_SET_FIELD` does the exact same search, it just writes to the slot instead of reading it. <br />
+
+*Cool Note:* Field names are compared with a plain `==` on the pointers, not `strcmp`. That only works because every string is **interned**, so two strings with the same text are always the exact same object in memory. <br />
+
+If it isn't a field, it might be a method, so we check the class's `methods` hashmap too. Calling a method though usually skips all of this, thanks to `OP_INVOKE`:
+
+```c++
+case OP_INVOKE:
+{
+	//read the name of the method and then the argcount for it as well
+	Value nameVal = READ_CONSTANT();
+	ObjString* name = AS_STRING(nameVal);
+	uint8_t argCount = READ_BYTE();
+
+	//get the instance value as it sits below all the above items
+	Value instanceVal = peek(vm, argCount);
+
+	//checks
+	if (!IS_OBJECT(instanceVal) || GET_OBJECT_VAL(instanceVal)->type != OBJ_INSTANCE)
+	{
+		runtimeError(vm, "You may only call a method from a class instance owning said method", "RUNTIME ERROR");
+		return INTERPRET_RUNTIME_ERROR;
+	}
+
+	//otherwise get the instance
+	ObjInstance* instance = (ObjInstance*)GET_OBJECT_VAL(instanceVal);
+
+	//look it up in the class hashmap
+	Value method;
+	if (!MapGet(&instance->class->methods, name, &method))
+	{
+		runtimeError(vm, "Undefined method called.", "RUNTIME ERROR");
+		return INTERPRET_RUNTIME_ERROR;
+	}
+
+   //Move yourself towards the actual method
+	ObjClosure* closure = (ObjClosure*)GET_OBJECT_VAL(method);
+	if (vm->frameCount == FRAMES_MAX)
+	{
+		runtimeError(vm, "Too many function calls deep.", "STACK OVERFLOW ERROR");
+		return INTERPRET_RUNTIME_ERROR;
+	}
+	if (argCount != closure->function->arity)
+	{
+		runtimeError(vm, "Method was called with a different number of arguements than it had expected.", "RUNTIME ERROR");
+		return INTERPRET_RUNTIME_ERROR;
+	}
+
+	//set up the callframe for that method to start running there
+	CallFrame* newFrame = &vm->frames[vm->frameCount++];
+	newFrame->closure = closure;
+	newFrame->ip = closure->function->chunk.byteCode;
+	newFrame->slots = vm->stackTop - argCount - 1;
+
+	frame = &vm->frames[vm->frameCount - 1];
+	break;
+}
+```
+*Found in /src/vm.c*
+
+`OP_INVOKE` is basically `OP_GET_FIELD` and `OP_CALL` squished into a single instruction. The instance sits on the stack underneath the arguments, so we `peek` past them to grab it, look the method up in its class's hashmap, and then set up a brand new call frame for it, the same way that `call()` does. Doing it in one instruction means we never have to push the method onto the stack just to call it right away. <br />
+
+Since the instance is at the very bottom of the new frame's window, it ends up in slot `0`, which is exactly where `this` lives in a method. `OP_SUPER_INVOKE`, for `pullf`, is the same thing, except it looks the method up in `instance->class->superClass` instead.
+
+# Putting It All Together
+
+The very last piece is the function that kicks all of this off:
+
+```c++
+vmResult interpret(const char* source, Vm* vm)
+{
+    ObjFunction* topScript = compile(source, vm); //compiles into asts and then also sets up the type checker
+
+    //error checking
+    if (topScript == NULL)
+    {
+        return INTERPRET_COMPILE_ERROR;
+    }
+
+
+    //after compiling the bytecode, set up the place where its going to be read from
+    push(vm, CREATE_OBJECT_VAL((Obj*)topScript)); //protect topScript func while it turns into closure
+    ObjClosure* scriptClosure = newClosure(topScript, vm);
+    pop(vm);
+
+
+    push(vm, CREATE_OBJECT_VAL((Obj*)scriptClosure));
+    call(scriptClosure, 0, vm);
+
+    //run the code that the compiler wrote to the vms chunk
+    vmResult result = run(vm);
+
+    return result;
+}
+```
+*Found in /src/vm.c*
+
+This is the whole pipeline in one function. `compile()` runs everything from the scanner to the bytecode compiler, and gives us back the top level `<script>` function, or `NULL` if there was a compile error. We then wrap that function in a closure (protecting it from the GC while we do), push it onto the stack, and `call()` it, just like any other function. That gives us our very first call frame, and then `run()` takes it from there, until the last `OP_RETURN` hands back `INTERPRET_OK`. <br />
+
+*Cool Note:* If you turn on `DEBUG_TRACE_EXECUTION` in `/include/common.h`, that debug block at the top of the loop prints the whole stack before every single instruction. It is the best way to actually *see* everything on this page happening, just be warned that it prints a LOT.
+
+## Where to Go Next
+
+And that is the Virtual Machine! Your source code has gone through every single stage of the pipeline, and has finally been run. There is just one thing left: all of the strings, arrays, and instances that your program created along the way are still sitting in memory. Cleaning those up while the program is running is the job of the [Garbage Collector](https://olinat.net/docs/system-design/markSweep).
