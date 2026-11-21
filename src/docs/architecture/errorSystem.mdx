@@ -1,0 +1,191 @@
+# Errors Under the Hood
+
+If you have read the [Error Handling](https://olinat.net/docs/guides/errors) guide, you already know what Oli-Nat's errors look like, and what most of them mean. This page is about the other side of that: where those errors actually come from inside of the interpreter, how they travel through the pipeline, and how one typo ends up as an exit code. <br />
+
+Errors are a bit of a strange part of the codebase, because they are not really one part of it. Every stage of the pipeline can find a problem, and each one reports it a little differently, because each one knows different things. The scanner only knows characters, the parser knows tokens, the type checker knows trees, and the VM knows what is actually running. So there are really **three** functions that every error in Oli-Nat goes through:
+
+| Stage | Function | What it knows | Looks like |
+| ----- | -------- | ------------- | ---------- |
+| Scanner & Parser | `errorAt()` | The line and the exact token | `:>>  SYNTAX ERROR -- [line 3 at 'println': ...]` |
+| Type Checker | `typeError()` | Only the line of the node | `:>>  \| TYPE ERROR \| at line 2: ...]` |
+| Virtual Machine | `runtimeError()` | The line, and every function call that led there | `:>>  FILE ERROR -- ...` and a stack trace |
+
+Let's go through them in the same order your code goes through the pipeline.
+
+## Scanner Errors: The Error Token
+
+You might think the scanner would print its own errors, but it actually never prints anything. Instead, when it finds something it can't turn into a token, like a `@` or a string that never ends, it hands back a special kind of token:
+
+```c++
+static Token errorToken(const char* message, Scanner* scanner)
+{
+    //basically makeToken but a little different for errors
+    Token token;
+    token.type = T_ERROR;
+    token.lexemeStart = message;
+    token.length = (int)strlen(message);
+    token.line = scanner->line;
+    return token;
+}
+```
+*Found in /src/scanner.c*
+
+This is the fun trick. A normal token's `lexemeStart` points at the piece of source code it came from, but an error token's `lexemeStart` points at the **error message** instead. So the "text" of the token *is* the message. The scanner just keeps doing its one job of giving out tokens, and leaves the reporting to the parser, which is the one asking for tokens anyways:
+
+```c++
+static void advance(ASTparser* parser)
+{
+    parser->previous = parser->current;
+
+    //loop through each token until you find one that isnt an error
+    //(Allows for panic mode)
+    for (;;)
+    {
+        parser->current = scanToken(&parser->scanner);
+        //printToken(parser->current, &parser->scanner);
+        if (parser->current.type != T_ERROR) break;
+        errorAtCurrent(parser->current.lexemeStart, "PARSER ERROR", parser);
+    }
+}
+```
+*Found in /src/ASTcompiler.c*
+
+Every time the parser asks for a new token, it checks if it got an error token. If it did, it reports it as a `PARSER ERROR`, using the token's text as the message, and then just asks the scanner for the next one, skipping right over the bad character. That is also why `errorAt()` has an empty branch for `T_ERROR` tokens. Normally it prints the token you were at, but for an error token that would just print the message a second time. So the result looks like this:
+
+```
+:>>  PARSER ERROR -- [line 2: An unexpected character was encountered, what on earth are you typing?]
+```
+
+## Parser Errors and Panic Mode
+
+The parser's errors all go through `errorAt()`, which is covered in full on the [AST Compiler](https://olinat.net/docs/system-design/astCompiler) page, so here is just the short version. `errorAt()` prints the error type, the line, and the token the parser was looking at, and then sets two flags on the parser:
+
+- `hadError`, which means the program will never be allowed to run.
+- `panicMode`, which makes `errorAt()` ignore every error after the first one.
+
+Then, at the end of every declaration, if the parser is in panic mode, it calls `synchronize()`, which skips tokens until it finds something that looks like the start of a new statement, like a `;` or a keyword such as `make` or `if`, and turns panic mode back off. That combination is what makes Oli-Nat report **one** error per broken statement, instead of one real error followed by a pile of confused ones. And since parsing keeps going afterwards, a program with three separate mistakes reports all three in one run. <br />
+
+Most syntax errors are a `consume()` that didn't find the token it expected, and `consume()` reports at the **current** token, the first one that didn't fit. That is why a missing `;` at the end of line 2 shows up as an error on line 3:
+
+```
+:>>  SYNTAX ERROR -- [line 3 at 'println': Expected ';' after you declare a new variable]
+```
+
+## Type Checker Errors
+
+The type checker has its own reporting function:
+
+```c++
+static void typeError(TypeChecker* checker, ASTparser* parser, Expr* expr, const char* message, const char* messageType)
+{
+    if (parser->panicMode) return;
+
+    fprintf(stderr, ":>>  | %s | at line %d: %s] \n", messageType, expr->line, message);
+    checker->hadError = true;
+    checker->errorCount++;
+
+    parser->hadError = true;
+    parser->panicMode = true;
+}
+```
+*Found in /src/typeChecker.c*
+
+It looks very similar to `errorAt()`, with two differences. The first is that it can't print a token, because by the time the type checker runs, there are no tokens anymore, just trees. The only location information left is the `line` stored in each node of the tree, so that is all the error can tell you. <br />
+
+The second difference is the interesting one. It sets `hadError` on **both** the checker and the parser, and it also uses the *parser's* `panicMode`. The type checker and the parser are really running at the same time, one expression at a time, so they share the same panic mode. When the type checker finds a problem, the parser's `synchronize()` cleans it up at the end of the statement, exactly the same way it would for a syntax error. <br />
+
+Panic mode matters even more here than in the parser. The type checker works from the bottom of a tree up, and when one node is broken, every node above it gets `VALUE_ERROR` back from its child, and would happily report its own error about it. With panic mode, only the first, real one gets printed:
+
+```
+:>>  | TYPE ERROR | at line 2: If you want to do math, you have to use numbers (double, float, int), please.]
+```
+
+## From an Error to an Exit Code
+
+So far, an error is just some text printed to the terminal and a flag being set. This is how it actually stops your program. At the very end of `compile()`, both flags get checked:
+
+```c++
+    return (parser.hadError || checker.hadError) ? NULL : topScript;
+```
+*Found in /src/ASTcompiler.c (trimmed, inside compile())*
+
+If either the parser or the type checker had an error, `compile()` returns `NULL` instead of the compiled program. `interpret()` sees the `NULL` and returns `INTERPRET_COMPILE_ERROR` without ever calling `run()`, which is how it is guaranteed that **no** code runs if there is a single compile error. Then `main.c` turns the result into an exit code:
+
+```c++
+static void runFile(const char* filePath, Vm* vm)
+{
+    //get a char array of the source, interpet, then free
+    const char* source = readFile(filePath);
+    vmResult result = interpret(source, vm);
+    free((void*)source);
+
+    if (result == INTERPRET_RUNTIME_ERROR)
+    {
+        exit(65);
+    }
+    if (result == INTERPRET_COMPILE_ERROR)
+    {
+        exit(70);
+    }
+```
+*Found in /src/main.c*
+
+So a compile error exits with `70`, a runtime error exits with `65`, and a successful program exits with `0`. There is one more you might see, `74`, which means the interpreter couldn't even read your file in the first place. <br />
+
+Those numbers are actually carefully chosen. They come from a set of standard exit codes from Unix systems (`sysexits.h`): `65` means "the input data was bad", `70` means "internal software error", and `74` means "input/output error". They are the same ones CLOX uses. The exit code is also what the [test suite](https://olinat.net/docs/contributing/testing) checks, so a test can expect a program to fail with a compile error and pass when it does.
+
+## Runtime Errors
+
+Runtime errors go through `runtimeError()`, which is covered on the [Virtual Machine](https://olinat.net/docs/system-design/virtualmachine) page. It prints the error and message, sets `hadRuntimeError`, and then walks through every call frame that is currently running, to print a **stack trace**:
+
+```
+:>>  FILE ERROR -- Unable to open up file at:  nope.txt
+Stack trace:
+  [line 5] in load()
+  [line 7] in <script>()
+```
+
+The line numbers come from the chunk's `lines` array, which stores the source line of every single byte of bytecode (see [Chunks & Memory](https://olinat.net/docs/system-design/chunks-memory)). For every frame, the VM works out how far its instruction pointer is into its bytecode, and looks up that spot in `lines`. <br />
+
+Stopping the program is simple for most instructions. They call `runtimeError()` and then immediately `return INTERPRET_RUNTIME_ERROR` out of `run()`. But that error above wasn't raised by an instruction, it was raised inside of a **native function**, `readFile()`:
+
+```c++
+Value readFileNative(int argCount, Value* args, struct Vm* vm) //get all content from file
+{
+    char* path = AS_CSTRING(args[0]);
+    FILE* file = fopen(path, "r");
+
+    if (file == NULL)
+    {
+        char result[100];
+        char errorMsg[] = "Unable to open up file at: ";
+        snprintf(result, sizeof(result), "%s %s", errorMsg, path);
+        runtimeError(vm, result, "FILE ERROR");
+        return CREATE_EMPTY_VAL();
+    }
+```
+*Found in /src/natives.c (trimmed, inside readFileNative())*
+
+A native is just a plain C function that returns a `Value`, so it has no way to return an error code. It calls `runtimeError()`, and then returns an empty value just so it returns *something*. That is where the `hadRuntimeError` flag earns its keep. As soon as a native finishes, the VM checks the flag:
+
+```c++
+            case OBJ_NATIVE:
+            {
+                ObjNative* native = (ObjNative*)GET_OBJECT_VAL(callee);
+                Value result = native->function(argCount, vm->stackTop-argCount, vm);
+
+                //add check for incorrect returns in native functions so runtime errors perk
+                if (vm->hadRuntimeError) return false;
+
+                vm->stackTop -= argCount + 1;
+                push(vm, result);
+                return true;
+            }
+```
+*Found in /src/vm.c (trimmed, inside callValue())*
+
+If the native raised an error, `callValue()` returns `false`, `OP_CALL` returns `INTERPRET_RUNTIME_ERROR`, and the program stops, the same as if the error had happened in the VM itself.
+
+## Errors in the Playground
+
+Every error in this page is printed to `stderr`, while your program's normal output goes to `stdout`. The [playground](https://olinat.net/playground) takes advantage of that. It catches the two streams separately, so normal output shows up in the terminal as usual, and anything printed to `stderr` shows up in **red**. Same errors, same messages, just a little easier to spot.

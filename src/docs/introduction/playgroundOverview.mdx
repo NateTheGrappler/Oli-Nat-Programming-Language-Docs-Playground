@@ -1,0 +1,83 @@
+# How to Use the Playground
+
+The [playground](https://olinat.net/playground) is the fastest way to try out Oli-Nat. There is nothing to download or install, you just write some code and press **Run**. It is the *exact same* interpreter that you would build on your own machine, written in C, just compiled to **WebAssembly** so that it can run right inside of your browser!<br />
+
+You can get to it at any time with the **Playground** link in the navigation bar at the top of the page.
+
+## The Layout
+
+The playground is made up of three parts:
+
+1. **Sample Programs**, a list of example programs at the top.
+2. **The Editor**, where you write your code.
+3. **The Terminal**, the little retro computer screen, where your program's output shows up.
+
+On a smaller screen, like a phone, these stack on top of each other instead of sitting side by side.
+
+## Writing Code
+
+When you first open the playground, the editor already has a tiny program in it:
+
+```java
+#pullf io
+println("Hello Dear User!");
+```
+
+The editor works like most code editors do. It has line numbers, it highlights the line you are on, long lines wrap around instead of running off the screen, and you can fold blocks of code with the little arrows next to the line numbers. The syntax highlighting is borrowed from C++, since Oli-Nat's syntax is so similar, so most things will be colored the way you expect. <br />
+
+Under the editor there are two buttons:
+
+- **Run**, which runs the code in the editor.
+- **Clear**, which wipes the editor, so you can start from scratch.
+
+Don't forget that you need to `#pullf` a library before you can use any of its functions, even in the playground. Almost every program will want `#pullf io` at the top, since that is where `print` and `println` come from. See the [Standard Library Overview](https://olinat.net/docs/stdlib/overview) for all of the libraries.
+
+## Running Code
+
+When the page first loads, the terminal says `> loading Oli-Nat Binaries...`. That is the browser downloading the interpreter, which only takes a moment. Once it says `:> press run to execute your code!`, you are good to go. <br />
+
+Press **Run**, and your program's output shows up in the terminal, with every line starting with `:>`. If something goes wrong, whether it is a syntax error, a type error, or an error while the program is running, the error message shows up in **red**, so it is easy to tell apart from your normal output. The messages are exactly the same as they would be on your own machine, and the [Error Handling](https://olinat.net/docs/guides/errors) guide explains how to read all of them. <br />
+
+One thing to know is that the output shows up all at once, **when your program finishes**, instead of line by line while it runs. For almost every program this happens instantly, so you will never notice. But it does mean that if you write an infinite loop, like a `while (true)` with no way out, the program never finishes, so nothing will ever show up, and the page will freeze. If that happens, just refresh the page. <br />
+
+## Typing Input
+
+Programs in the playground can ask you for input too, with `intake()`:
+
+```java
+#pullf io
+make string name = intake("What is your name? ");
+println("Hello " + name + "!");
+```
+
+When your program reaches `intake()`, it pauses, shows everything it has printed so far, and an input line appears at the bottom of the terminal. Type your answer and press **Enter**, and the program picks up right where it left off, with whatever you typed. <br />
+
+This is actually one of the hardest things to get working in a browser. A normal terminal program can just stop and wait for you to type, but a web page can't, or the whole page would freeze. The playground uses a tool called Asyncify, which lets the interpreter pause in the middle of running your program, hand control back to the browser so you can type, and then continue exactly where it stopped. If you are curious about how that works, see [Local Setup](https://olinat.net/docs/contributing/getting-started).
+
+## Sample Programs
+
+If you just want to see what Oli-Nat can do, click any of the **Sample Programs** at the top:
+
+| Program                       | What it shows off                                         |
+| ----------------------------- | --------------------------------------------------------- |
+| **Hello World**               | The classic, the smallest possible program                |
+| **Fibonacci Recursion**       | Functions calling themselves                              |
+| **Closures**                  | Functions that capture variables from around them         |
+| **Classes**                   | Classes, constructors, and methods                        |
+| **Dataset**                   | Working with arrays of data                               |
+| **ASCII Art**                 | Drawing with text in the terminal                         |
+| **Tic Tac Toe (RECOMMENDED)** | A full game you can play, using `intake()` for your moves |
+
+Clicking one loads it straight into the editor, then just press **Run**. Feel free to change them and see what happens, that is what they are there for. <br />
+
+Clicking a sample program **replaces** whatever is in the editor, and the playground doesn't save your code anywhere, not even when you refresh the page. So if you have written something you want to keep, copy it somewhere safe first!
+
+## Playground vs. Your Own Machine
+
+Since the playground is the real interpreter, almost everything works exactly the same as it would on your own computer. There are just a few small differences, because a web page isn't a real terminal or operating system:
+
+- **File IO** works, but the files live in a temporary file system inside of your browser, not on your computer. They disappear when the page reloads, and a program can't open files from your own machine.
+- **Chronos** timing functions like `clock` and `sleep` aren't always as precise in the browser. See the [Chronos](https://olinat.net/docs/stdlib/chronos) page for details.
+- **Long running programs** don't show any output until they finish, as mentioned above.
+
+If you want to write bigger programs, or keep your code in files, see [Installation](https://olinat.net/docs/installation) to build Oli-Nat on your own machine. And if you find something that works differently in the playground than it does on your computer, please [open an issue](https://github.com/NateTheGrappler/Oli-Nat-Programming-Language-Docs-Playground/issues) so I can look into it!

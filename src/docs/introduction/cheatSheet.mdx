@@ -1,0 +1,232 @@
+# Cheat Sheet
+
+This is mean to be as close to the whole language on the page as possible. It doesn't explain much, the [guides](https://olinat.net/docs/guides/syntax) do that, it is just here so you can keep it open while you write code and quickly look up how something is spelled. Every example on this page runs as long as you put `#pullf stdlib` at the top, so feel free to paste them into the [playground](https://olinat.net/playground).
+
+## The Basics
+
+```java
+//import a library before using any of its functions
+#pullf io
+
+//comments use two slashes, there are no block comments
+println("Hello!");     //every statement ends in a semicolon
+print("no newline");   //print doesn't add a new line, println does
+```
+
+## Keywords
+
+```java
+make int float double bool string empty class this pullf
+if else while for return true false and or
+```
+
+## Types
+
+| Type | Example | Notes |
+| ---- | ------- | ----- |
+| `int` | `42` | Whole numbers |
+| `float` | `2.5f` | Decimals with an `f` on the end |
+| `double` | `3.14159` | Decimals without an `f` are doubles |
+| `bool` | `true`, `false` | |
+| `string` | `"hello"` | Double quotes only |
+| `int[]`, `string[]`, ... | `[1, 2, 3]` | Arrays of one type |
+| `empty` | | Only for functions that don't return anything |
+
+## Variables
+
+```java
+make int count = 10;          //make, then the type, then the name
+make float speed = 2.5f;
+make double pi = 3.14159;
+make bool ready = true;
+make string name = "Oli";
+
+count = count + 1;            //assignment
+count += 2;                   //also -=, *=, /=
+count++;                      //also --
+```
+
+Every variable needs a value when it is made, and the value has to be the **exact** type you declared. `make double d = 1;` is an error, since `1` is an `int`.
+
+## Operators
+
+From the tightest binding to the loosest:
+
+| Operators | What they do |
+| --------- | ------------ |
+| `.` `()` `[]` | Fields and methods, calls, indexing |
+| `-` `!` | Negate a number, flip a bool |
+| `*` `/` | Multiply, divide (`int / int` rounds down) |
+| `+` `-` | Add, subtract, and `+` joins strings |
+| `<` `>` `<=` `>=` | Comparisons, numbers only |
+| `==` `!=` | Equality |
+| `&&` or `and` | Both are true, stops early if the left is false |
+| `\|\|` or `or` | Either is true, stops early if the left is true |
+| `=` `+=` `-=` `*=` `/=` | Assignment |
+
+Mixing number types promotes the result: `int` and `float` give a `float`, and anything with a `double` gives a `double`.
+
+## Arrays
+
+```java
+#pullf utils
+
+make int[] scores = [90, 85, 77];
+scores[1] = 100;              //indexes start at 0
+println(scores[1]);           //100
+println(length(scores));      //3, length() comes from #pullf utils
+```
+
+Arrays have a fixed size, and every element has to be the same type. Going outside of the array is an `OUT OF BOUNDS ERROR`.
+
+## Control Flow
+
+```java
+if (count > 10 && ready)
+{
+    println("big");
+}
+else if (count > 5)
+{
+    println("medium");
+}
+else
+{
+    println("small");
+}
+
+make int i = 0;
+while (i < 3)
+{
+    i++;
+}
+
+for (make int j = 0; j < 3; j++)
+{
+    println(j);
+}
+```
+
+Conditions have to be a real `bool`, so `if (count)` is an error, you would write `if (count != 0)`.
+
+## Functions
+
+```java
+make int add(int a, int b)    //return type, name, then typed parameters
+{
+    return a + b;
+}
+
+make empty greet(string who)  //empty means it returns nothing
+{
+    println("Hello " + who);
+}
+
+make int fib(int n)           //functions can call themselves
+{
+    if (n < 2) { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+
+println(add(2, 3));           //5
+greet("world");
+println(fib(10));             //55
+```
+
+Every function that returns something has to hit a `return`, or you get a `MISSING RETURN ERROR`, technically this is true for ALL functions, but I abstracted out the return for empty functions just so its better for the user.
+
+## Closures
+
+```java
+make empty outer()
+{
+    make int total = 0;
+    make empty bump()         //a function inside of a function
+    {
+        total += 5;           //can use and change outer's variables
+        println(total);
+    }
+    bump();                   //5
+    bump();                   //10
+}
+outer();
+```
+
+## Classes
+
+```java
+class Animal
+{
+    make string sound = "...";         //a field with a default value
+    make int legs;                     //fields don't need a default
+
+    make empty Animal(int l)           //the constructor shares the class's name
+    {
+        this.legs = l;
+    }
+
+    make string speak()                //a method
+    {
+        return this.sound;
+    }
+}
+
+make Animal cat = Animal(4);
+cat.sound = "Meow";                    //set a field
+println(cat.speak());                  //Meow
+println(cat.legs);                     //4
+```
+
+## Inheritance
+
+```java
+class Dog -> Animal                    //Dog inherits from Animal
+{
+    make string speak()                //override a parent's method
+    {
+        return "Woof, and " + pullf.speak();   //pullf calls the parent's version
+    }
+}
+
+make Dog d = Dog();
+println(d.speak());                    //Woof, and ...
+```
+
+Constructors aren't inherited, so a class without its own constructor is always made with no arguments, like `Dog()`.
+
+## The Standard Library
+
+| Import           | Functions Given                                                             |
+| ---------------- | --------------------------------------------------------------------------- |
+| `#pullf io`      | `print`, `println`, `intake`                                                |
+| `#pullf math`    | `sqrt`, `pow`, `abs`, `floor`, `ceil`, `sin`, `cos`, `tan`, logs, and more  |
+| `#pullf random`  | `random`, `randint`, `seed`                                                 |
+| `#pullf chronos` | `clock`, `sleep`, `time`, `dateString`, `timeString`                        |
+| `#pullf fileIO`  | `readFile`, `writeFile`, `appendFile`, `fileExists`, `deleteFile`           |
+| `#pullf types`   | Conversions like `intToStr`, `strToInt`, `doubleToInt` etc.                 |
+| `#pullf Strings` | `strLength`, `strToUpper`, `strToLower`, `strReplace`, `strSlice`, and more |
+| `#pullf utils`   | `length`, `assert`                                                          |
+| `#pullf stdlib`  | All of the above at once                                                    |
+
+```java
+#pullf stdlib
+
+println(sqrt(16.0));           //4.000000
+println(intToStr(42) + "!");   //42!
+println(strToUpper("loud"));   //LOUD
+
+make string name = intake("What is your name? ");   //waits for you to type
+```
+
+See the [Standard Library Overview](https://olinat.net/docs/stdlib/overview) for every function, and the page for each library.
+
+## Errors
+
+| You'll see                           | It means                                                                                            |
+| ------------------------------------ | --------------------------------------------------------------------------------------------------- |
+| `SYNTAX ERROR`                       | The code doesn't follow the grammar, usually a missing `;`, `(`, or `}`. Check the line *above* too |
+| `TYPE ERROR` / `TYPE MISMATCH ERROR` | A value is the wrong type for where it is used                                                      |
+| `UNDEFINED ERROR`                    | A name that was never declared, or a library that wasn't `#pullf`ed                                 |
+| `RUNTIME ERROR` and friends          | Something went wrong while the program was running, with a stack trace                              |
+
+A compile error means **nothing** runs, and exits with code `70`. A runtime error stops the program partway through, and exits with code `65`. The [Error Handling](https://olinat.net/docs/guides/errors) guide has every error and what it means.

@@ -28,6 +28,8 @@ export const sections: Section[] = [
         {slug: 'introduction', title: 'Introduction'}, //maybe eventually make this into like a landing page, maybe
         {slug: 'overview', title: 'Overview'},
         {slug: 'installation', title: 'Installation'},
+        {slug: 'playgroundOverview', title: 'Playground Tutorial'},
+        {slug: 'cheatSheet', title: 'Cheat Sheet'},
     ],
     nextRoute: '/docs/guides/syntax',
     nextRouteLabel: 'Basic Guides'
@@ -120,10 +122,11 @@ export const sections: Section[] = [
         
         {slug: 'virtualmachine',            title: "Virtual Machine"},
         
-        {slug: 'garbage',                  title: "Garbage Collector"},
+        {slug: 'garbage',                   title: "Garbage Collector"},
         
         {slug: 'dataStructures',            title: 'Objects & Data Structures'},
-        {slug: 'functions',                 title: 'Functions & Closures'}
+
+        {slug: 'errorSystem',               title: 'Error System'}
 
     ],
     nextRoute: '/docs/contributing/getting-started',
